@@ -13,7 +13,18 @@ tested 45 writable/stable registers, PA table and prior RX/IDLE state restored.
 Controlled two-way normal-UI/Flipper-CLI plaintext chat, nine frequency/restore
 checks, keyboard preview with TX count zero, and eleven SD apps at 120 frames
 each also passed. See [the release 3 test report](TEST_REPORT.md) for exact
-scope and counts. Enhanced GUI RF and the companion FAP remain unverified.
+scope and counts. Enhanced GUI RF was unverified at publication; the dated
+follow-up below supersedes that limit for the tested short-ASCII exchange.
+The companion FAP remains physically unverified.
+
+**Post-publication follow-up, 2026-10-21:** unchanged ESP32 firmware passed
+short plaintext exchange in both directions with the actual Enhanced Chat
+GUI v1.2 on Unleashed 094e (`2f62b3ab`, API 88.19), using No encryption,
+433.920 MHz and Internal radio. Flipper GUI text reached ESP32 with valid
+CRC flags; its GUI visibly received `ESP-HACK: TEST123`. Main-menu restoration
+and the device's persisted +115 ppm were confirmed. This does not cover
+encryption, long-message RF, range or the companion FAP. Published `.3`
+artifacts are unchanged; see [the dated report](TEST_REPORT.md).
 
 The earlier release 1/2 hardware records are historical. The Russian `c5779ee` build
 passed its three-job CI run and all eleven installed SD apps passed 120
@@ -26,7 +37,8 @@ not a completed calibrated two-way test. All three CI jobs passed at
 The final `087f9b6` image passed controlled two-way plaintext exchange between
 the normal ESP32 chat UI and the installed Flipper's internal-radio CLI at
 nominal 433.920 MHz, using this ESP32's persisted +115 ppm correction.
-Enhanced Chat's GUI, ESP ACK/FAP and general RF performance remain unverified.
+At that earlier stage, Enhanced Chat's GUI, ESP ACK/FAP and general RF
+performance were unverified.
 All three CI jobs also passed at `087f9b6`. Its four flash segments verified,
 OLED keyboard screenshot was viewed, no-TX preview/cancel passed, and all
 eleven apps passed 120 diagnostic frames each. Earlier `d63f1ca` evidence is historical.
@@ -54,7 +66,7 @@ eleven apps passed 120 diagnostic frames each. Earlier `d63f1ca` evidence is his
 | Modulation Explorer | Sequential four-preset RSSI/edge comparison | Preset/config tests | Physical comparison pending; no automatic identification claim |
 | Music Lab | RAW inspection and finite binary OOK RMT playback | Parser/staging/timing bounds | ESP→Flipper RAW reception/timing pending |
 | ESP ACK chat | Shared protocol,160 ASCII bytes,4fragments, ACK/retry/backoff/discovery/duplicates, retained in Advanced | C99/C++11 loss/duplicate/delay/reboot/wrap/bounds tests | Supplied companion FAP/ESP ACK physical exchange remains unverified; distinguish it from the user's Enhanced plaintext app |
-| Simple Flipper plaintext chat | Read/send screen, automatic 433.920 MHz / plaintext / nominal 0 dBm TX-ready setup for the authorized Faraday test; manual sends, finite governor and packet/CRC/FIFO/state diagnostics | 205,361 C99 checks and 205,361 C++11 checks on Windows/Linux; profile/carrier-gate suite 1,048,643 checks; release 3 editor/UART controller 2,508 checks | Repeated on release 3 `9b93f08`: normal UI ↔ installed Flipper internal-radio CLI controlled plaintext exchange PASS at nominal 433.920 MHz with local +115 ppm trim; Enhanced GUI RF itself untested |
+| Simple Flipper plaintext chat | Read/send screen, automatic 433.920 MHz / plaintext / nominal 0 dBm TX-ready setup for the authorized Faraday test; manual sends, finite governor and packet/CRC/FIFO/state diagnostics | 205,361 C99 checks and 205,361 C++11 checks on Windows/Linux; profile/carrier-gate suite 1,048,643 checks; release 3 editor/UART controller 2,508 checks | Release 3 CLI exchange passed. Follow-up 2026-10-21: unchanged ESP32 ↔ actual Enhanced Chat GUI v1.2 on Unleashed 094e passed short ASCII both ways at nominal 433.920 MHz / Internal / No encryption with local +115 ppm; encryption, long RF messages and companion FAP remain unverified |
 | CC1101 reference-clock diagnostic | Finite idle-only GPIO4/PCNT probe, restores radio pin configuration and reports errors; no RF transmit | 246 checks of real probe under hardware mocks, including counter faults, timing and cleanup | Coarse reference-clock evidence is separate from fine RF accuracy; mocks do not measure the module |
 | Device-local frequency correction | Bounded signed-ppm correction, band-edge validation and NVS persistence; no global default offset | 6,730,289 arithmetic, persistence and guard checks | This unit's +115 ppm persisted across reset; busy save blocked; normal chat received valid CRC with zero FREQEST and controlled two-way CLI exchange passed; no external RF calibration |
 | Flipper FAP | Official1.5.1, API88.2, public exports, independent radio task | Shared protocol tests; actual strict FAP import check | Physical Flipper launch/UI/RF pending |

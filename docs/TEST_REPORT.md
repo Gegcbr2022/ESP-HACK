@@ -5,6 +5,29 @@ source **`9b93f08`**. The release 1 and release 2 build, native-test and hardwar
 records below retain their original source pins; they are not relabeled as
 release 3 results.
 
+## Post-publication follow-up: Enhanced Chat GUI, 2026-10-21
+
+After the Flipper was updated to **Unleashed 094e**, commit **`2f62b3ab`**,
+API **88.19**, the real **Enhanced Sub-GHz Chat GUI v1.2** passed a controlled
+short-ASCII exchange in both directions. The GUI settings were **No encryption**,
+**433,920,000 Hz** and **Internal** radio. The ESP32 firmware was unchanged and
+retained this device's saved **+115 ppm** correction.
+
+Flipper GUI transmission changed the ESP32 from `RX=0 / packets=0` to
+`RX=2 / packets=2`, with `test94` as the last text and both the packet trailer
+CRC flag and independently read status CRC flag valid. One explicit
+`chatsend TEST123` then appeared as **`ESP-HACK: TEST123`** in the Flipper GUI.
+The GUI's message lines and settings were independently inspected in a screen
+capture. Final ESP32 counters were `RX=3 / TX=1`; `chatclose` reported CLOSED
+and restored the main menu. A separate busy/refused send is not counted.
+
+This confirms that narrow GUI plaintext path on the tested pair. Encryption,
+long/multi-packet RF messages, range, collision stress and companion-FAP
+operation remain outside this result. Private raw logs/screens are not included.
+The publication-time records below retain their earlier GUI-unverified status
+as historical evidence. This follow-up changes documentation only: the
+published `.3` tag and its six assets remain unchanged.
+
 ## Release 3: physical capture, SD reopen and RAW replay
 
 The normal four-slot auto-RSSI receive path completed its 64-sample baseline
@@ -24,8 +47,8 @@ Readback checks passed for the tested **45 CC1101 registers**, PA table and
 prior RX/IDLE state after playback. No crash occurred. This result covers the
 controlled OOK/Princeton pair and a complete recorded burst with repetitions;
 it does not establish arbitrary protocol support, rolling-code replay, range,
-calibrated RF power/timing, or Enhanced Chat GUI operation. Enhanced GUI RF
-remains unverified.
+calibrated RF power/timing, or Enhanced Chat GUI operation. At publication,
+Enhanced GUI RF remained unverified; the later GUI test is recorded above.
 
 ## Release 3: repeated device regression checks
 
@@ -33,8 +56,8 @@ The same `9b93f08` device image also passed controlled two-way plaintext chat:
 both Flipper CLI test messages reached the normal ESP32 chat UI with valid CRC,
 and the Flipper CLI received the ESP32's manually requested `TEST123`. The
 device-local +115 ppm correction persisted; the check completed without panic.
-This uses the internal-radio worker shared by Enhanced Chat, while its GUI
-remains untested.
+This used the internal-radio worker shared by Enhanced Chat; its GUI was still
+untested in that publication-time check.
 
 Nine of nine finite file-frequency/restoration checks passed across nominal
 906,400,000, 433,889,000 and 433,920,000 Hz. The fixed synthetic transmissions

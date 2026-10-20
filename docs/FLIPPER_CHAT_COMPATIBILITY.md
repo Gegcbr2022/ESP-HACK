@@ -8,10 +8,13 @@ configuration; the value is a radio setting, not a calibrated power measurement.
 It sends no text automatically. Exiting chat stops its radio worker and restores
 the previous Radio Settings, radio preset, TX profile, power and chat mode.
 
-Controlled physical exchange now passes in both directions with the installed
-**Unleashed 086e (`e7e4e179`) CLI** at nominal 433.920 MHz. The tested ESP32
-module uses its explicitly saved **+115 ppm** correction; other devices still
-default to zero. The Enhanced GUI itself was not exercised in this exchange.
+**Follow-up, 2026-10-21:** controlled short-ASCII exchange passes in both
+directions with the actual **Enhanced Chat GUI v1.2** on **Unleashed 094e
+(`2f62b3ab`, API 88.19)**, using **No encryption**, **433.920 MHz** and
+**Internal** radio. The unchanged ESP32 firmware uses this module's explicitly
+saved **+115 ppm** correction; other devices still default to zero. Earlier
+086e CLI tests remain historical evidence below. This follow-up changes no
+published `.3` tag or release asset.
 
 **ESP ACK** remains available in **Дополнительно** for the framed ESP-HACK protocol
 and its companion FAP. Both participants must use the same format. Switching
@@ -27,9 +30,10 @@ format restarts the worker and clears the displayed history.
 1. Open **Радио SubGHz → Чат Flipper** on ESP32. The simple conversation
    screen applies 433.920 MHz and the plaintext profile automatically; no prior
    Radio Settings changes are needed.
-2. Connect the Flipper CLI and run `subghz chat 433920000 0` for its internal
-   radio; this is the path physically checked on Unleashed 086e. Alternatively open
-   Enhanced Sub-GHz Chat, choose **433.920 MHz** and **No encryption**. ESP32
+2. Open Enhanced Sub-GHz Chat, choose **433.920 MHz**, **No encryption** and
+   **Internal** radio; this GUI path was physically checked on Unleashed 094e.
+   Alternatively connect the Flipper CLI and run `subghz chat 433920000 0`,
+   the path previously checked on Unleashed 086e. ESP32
    cannot change the Flipper's encryption setting remotely.
 3. On ESP32 press **OK**, then **OK** again to send **TEST123**. The send menu
    initially selects **Тест TEST123** and also offers **Написать текст**,
@@ -65,9 +69,9 @@ selects Enhanced chat source commit
 appends CRLF. Enhanced encrypted messages are unsupported here. This reference
 does not establish compatibility with every future app/firmware revision.
 
-## Installed Unleashed and source comparison
+## Historical peer and source comparison
 
-The physical peer was identified as **Unleashed 086e**, commit `e7e4e179`.
+The original physical peer was identified as **Unleashed 086e**, commit `e7e4e179`.
 Its pinned [CLI chat path](https://github.com/DarkFlippers/unleashed-firmware/blob/e7e4e179/applications/main/subghz/subghz_cli.c)
 uses the [shared TX/RX worker](https://github.com/DarkFlippers/unleashed-firmware/blob/e7e4e179/lib/subghz/subghz_tx_rx_worker.c),
 which selects the [GFSK9_99Kb preset](https://github.com/DarkFlippers/unleashed-firmware/blob/e7e4e179/lib/subghz/devices/cc1101_configs.c)
@@ -96,8 +100,10 @@ identifies **Enhanced Sub-Ghz Chat v1.2**. Its
 disables encryption; its
 [send path](https://github.com/xMasterX/all-the-plugins/blob/1aa52e2a30efaf3f16d59abce9803d9b0f769972/apps_source_code/esubghz_chat/esubghz_chat.c)
 then appends CRLF and passes the bytes to that firmware transport. These sources
-match the ESP32 plaintext format. These 094/application-pack references are
-historical source comparisons, not the firmware installed on the tested peer.
+match the ESP32 plaintext format. At publication these 094/application-pack
+references were source comparisons, while the physical peer still ran 086e.
+The dated follow-up tested the peer after its update to 094e; it does not
+retroactively change the firmware identity of the earlier CLI tests.
 
 ## Radio and text format
 
@@ -213,3 +219,14 @@ Enhanced GUI interaction, a physical companion-FAP launch, 160-byte/multiple
 packet RF messages, long-range/loss characterization and adverse-condition
 FIFO recovery were not part of that completed exchange. Keep those limits
 separate from the passing host codec tests and short-message hardware result.
+
+On **2026-10-21**, after the peer update to **094e / `2f62b3ab` / API 88.19**,
+the actual **Enhanced Chat GUI v1.2** was tested with No encryption, 433.920 MHz
+and Internal radio. Its short `test94` text reached ESP32 with both trailer and
+status CRC flags valid. The GUI visibly received **`ESP-HACK: TEST123`** after
+one explicit ESP send. The settings and both message lines were independently
+inspected; final ESP counters were `RX=3 / TX=1`, followed by chat CLOSED and
+main-menu restoration. The ESP firmware was unchanged and retained +115 ppm.
+This confirms short GUI plaintext interoperability for that setup, not
+encryption, 160-byte RF messages, range, stress behavior or the companion FAP.
+Private logs/screens are not included; published `.3` assets are unchanged.

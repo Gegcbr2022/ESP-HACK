@@ -213,8 +213,29 @@ Additional checks on this same release 3 image passed:
 - All eleven SD apps at 120 diagnostic frames each, then Lua self-test PASS
   and main-menu return on the ESP32 at 240 MHz.
 
-These do not establish Enhanced Chat GUI RF or companion-FAP operation.
+At publication, these checks did not establish Enhanced Chat GUI RF or
+companion-FAP operation. The later GUI-only follow-up is recorded below.
 Earlier release 2 evidence above remains historical and separate.
+
+## Post-publication GUI follow-up, 2026-10-21
+
+The Flipper was updated to Unleashed **094e / `2f62b3ab` / API 88.19**.
+With **Enhanced Chat GUI v1.2**, **No encryption**, **433,920,000 Hz** and
+**Internal** radio, a controlled short-ASCII exchange passed in both directions
+without changing the ESP32 firmware. Its per-device **+115 ppm** remained loaded.
+
+The GUI's short `test94` message reached ESP32: baseline `RX=0 / packets=0`
+became `RX=2 / packets=2`, and both trailer CRC and separately sampled status
+CRC flags were valid. One explicit `chatsend TEST123` was visibly received in
+the Flipper GUI as **`ESP-HACK: TEST123`**. Independent inspection confirmed the
+GUI message lines and selected settings. Final ESP32 counters were `RX=3 / TX=1`;
+`chatclose` reported CLOSED and restored the main menu. A separate command
+refused while busy is excluded from this evidence.
+
+This is a short plaintext GUI test on that pair, not encryption, long-message,
+range or companion-FAP validation. Private raw logs/screens are not published.
+The published `.3` tag and six release assets remain immutable; this is a dated
+documentation follow-up, not a replacement firmware package.
 
 ## Physical checks still needed
 
