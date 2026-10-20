@@ -2,6 +2,7 @@
 #include "radio_config.h"
 #include "lab_limits.h"
 #include "raw_trace.h"
+#include "capture_history.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -22,6 +23,10 @@ struct LabSnapshot {
     bool captureRssiQualified;
     uint8_t lastRejectedCause;
     uint32_t lastRejectedUs;
+    uint8_t captureHistoryCount;
+    bool captureHistoryFull;
+    uint32_t captureHistoryDuplicates,captureHistoryDiscarded;
+    capture_history::Entry captureHistory[capture_history::kSlots];
     uint16_t sweepIndex, sweepPasses;
     int16_t sweep[kSweepBins], peakHold[kSweepBins];
     uint8_t registers[kRegisterCount];
@@ -46,7 +51,7 @@ struct LabSnapshot {
 bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& settings,
               TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz = 25000,
               ChatMode chatMode = ChatMode::EspAck, bool chatDiagnostics = false,
-              bool autoRawThreshold = false);
+              bool autoRawThreshold = false, bool multiRawHistory = false);
 bool labStop();
 void labRequestStop();
 LabSnapshot labSnapshot();
@@ -54,6 +59,10 @@ bool labQueueText(const char* text, uint16_t destination = 0);
 bool labDiscover();
 bool labReceiveMessage(uint16_t& source, char* text, size_t capacity);
 size_t labCopyPulses(int32_t* output, size_t capacity);
+// Join first. Published slots/configs remain immutable until explicit clear.
+size_t labCopyCaptureHistory(size_t index,int32_t* output,size_t capacity,
+                            RegisterImage& image,RadioSettings& settings);
+bool labClearCaptureHistory(); // stopped only, also releases32KiB bank
 // Debug-only ring: enable before starting RAW, dump only after stop/join.
 // Disable freezes/preserves evidence; release frees the optional49KiB bank.
 bool labRawTraceEnable(bool enabled);

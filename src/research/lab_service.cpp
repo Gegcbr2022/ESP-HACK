@@ -62,6 +62,13 @@ rmt_item32_t* rmtItems;
 RawTraceEntry* rawTraceBank;
 RawTrace rawTrace;
 static const size_t kRawTraceCapacity=4096;
+capture_history::History rawHistory;
+int32_t* rawHistoryBank;
+RegisterImage rawHistoryImages[capture_history::kSlots];
+RadioSettings rawHistorySettings[capture_history::kSlots];
+uint32_t rawHistoryDuplicates,rawHistoryDiscarded;
+bool activeRawHistory;
+bool historyCandidateStored;
 
 void traceRaw(uint8_t kind,uint32_t atUs,int32_t value,const TriggeredCapture& trigger) {
     portENTER_CRITICAL(&lock);
@@ -433,6 +440,78 @@ bool prepareRawThreshold() {
     status("Armed: measured noise threshold");
     return true;
 }
+void publishCaptureHistory() {
+    portENTER_CRITICAL(&lock);
+    state.captureHistoryCount=rawHistory.size();
+    state.captureHistoryFull=rawHistory.size()==capture_history::kSlots;
+    state.captureHistoryDuplicates=rawHistoryDuplicates;state.captureHistoryDiscarded=rawHistoryDiscarded;
+    for(size_t i=0;i<capture_history::kSlots;++i) {
+        const auto* entry=rawHistory.entry(i);
+        state.captureHistory[i]=entry?*entry:capture_history::Entry{};
+    }
+    portEXIT_CRITICAL(&lock);
+}
+bool restartRawCandidate(TriggeredCapture& trigger) {
+    raw_capture::stop();
+    if(!raw_capture::start(CC1101_GDO0)){status("RAW rearm allocation failed");return false;}
+    trigger=TriggeredCapture(capture,kWaveformCapacity,activeSettings.rssiThresholdDbm,raw_capture::snapshot().startedUs);
+    historyCandidateStored=false;
+    portENTER_CRITICAL(&lock);state.peakDbm=-127;portEXIT_CRITICAL(&lock);
+    publishRaw(trigger,raw_capture::snapshot());
+    return true;
+}
+bool waitRawHistoryBoundary(uint32_t receiveStartedMs) {
+    uint32_t lastFaultAt=micros(),weakAt=0;
+    auto previous=raw_capture::snapshot();bool weak=false;
+    while(!stopRequested) {
+        int32_t ignored;uint32_t ended;
+        for(size_t n=0;n<raw_capture::kCapacity&&raw_capture::pop(ignored,ended);++n){}
+        const int16_t rssi=sampleRawRssi();
+        if(!ELECHOUSE_cc1101.spiReady()){status("SPI fault during history rearm");return false;}
+        const uint32_t nowUs=micros();const auto current=raw_capture::snapshot();
+        if(current.dropped!=previous.dropped||current.rejected!=previous.rejected)lastFaultAt=nowUs;
+        previous=current;
+        if(rssi<activeSettings.rssiThresholdDbm){if(!weak){weak=true;weakAt=nowUs;}}
+        else weak=false;
+        const bool edgeQuiet=!current.queued&&int32_t(nowUs-current.lastEdgeUs)>=int32_t(TriggeredCapture::kQuietUs);
+        const bool weakQuiet=weak&&uint32_t(nowUs-weakAt)>=TriggeredCapture::kQuietUs;
+        if(uint32_t(nowUs-lastFaultAt)>=TriggeredCapture::kQuietUs&&(weakQuiet||edgeQuiet))return true;
+        if(activeSettings.rxTimeoutMs&&millis()-receiveStartedMs>=activeSettings.rxTimeoutMs)return false;
+        vTaskDelay(1);
+    }
+    return false;
+}
+bool retainRawCandidate(TriggeredCapture& trigger,uint32_t receiveStartedMs,bool rearm = true) {
+    raw_capture::stop();drainRaw(trigger,true);
+    const auto final=raw_capture::snapshot();trigger.integrity(final.dropped,final.rejected);
+    publishRaw(trigger,final);
+    bool accepted=false;
+    if(trigger.complete()) {
+        size_t index=0;
+        const capture_history::CandidateStatus quality={true,trigger.full(),trigger.dropped(),trigger.rejected()};
+        const auto result=rawHistory.add(capture,trigger.size(),activeSettings.frequencyHz,state.peakDbm,quality,&index);
+        if(result==capture_history::AddResult::Added) {
+            rawHistoryImages[index]=activeImage;rawHistorySettings[index]=activeSettings;accepted=true;
+        } else if(result==capture_history::AddResult::Duplicate) {++rawHistoryDuplicates;accepted=true;}
+        else if(result==capture_history::AddResult::Full) {publishCaptureHistory();status("History full: choose/save signals");return false;}
+    }
+    if(!accepted)++rawHistoryDiscarded;
+    historyCandidateStored=accepted;
+    publishCaptureHistory();
+    if(rawHistory.size()==capture_history::kSlots){status("History full: choose/save signals");return false;}
+    if(!rearm)return false;
+    if(stopRequested||!ELECHOUSE_cc1101.spiReady())return false;
+    if(!accepted) {
+        // Damaged candidates are never repaired/stored. Observe a separate
+        // clean boundary before starting a new candidate; retain prior slots.
+        if(!restartRawCandidate(trigger))return false;
+        status("Discarded damaged candidate; waiting quiet");
+        if(!waitRawHistoryBoundary(receiveStartedMs))return false;
+    }
+    if(!restartRawCandidate(trigger))return false;
+    status(accepted?"Signal retained: listening for next":"Rearmed after discarded candidate");
+    return true;
+}
 bool transmitPacket(const uint8_t* data, size_t length) {
     if(length > 60 || !permitLabTx(activeProfile, activeSettings.frequencyHz, 100,
                                    activeSettings.txLimitMs)) return false;
@@ -539,7 +618,10 @@ void worker(void*) {
         if(mode == LabMode::Raw) {
             // Continuously drain noise into the bounded pretrigger window; it
             // cannot fill the2048-interval output bank before a real RSSI gate.
-            if(!rawCaptureTick(rawTrigger,lastSample,now))break;
+            if(!rawCaptureTick(rawTrigger,lastSample,now)) {
+                if(!activeRawHistory||!retainRawCandidate(rawTrigger,rxStart))break;
+                lastSample=millis()-1;
+            }
         } else if(mode == LabMode::Sweep) {
             const uint32_t hz = activeSettings.frequencyHz + uint32_t(bin) * stepHz;
             if(!supportedFrequency(hz)) { status("Sweep exceeds CC1101 band"); break; }
@@ -647,6 +729,8 @@ void worker(void*) {
         const auto finalCapture = raw_capture::snapshot();
         rawTrigger.integrity(finalCapture.dropped, finalCapture.rejected);
         rawTrigger.stop(micros()); publishRaw(rawTrigger, finalCapture);
+        if(activeRawHistory&&rawTrigger.complete()&&!historyCandidateStored)
+            retainRawCandidate(rawTrigger,rxStart,false);
         traceRaw(3,micros(),int32_t(rawTrigger.rearmCount()),rawTrigger);freezeRawTrace();
     }
     idle(); pinMode(CC1101_GDO0, INPUT);
@@ -658,8 +742,19 @@ void worker(void*) {
 
 bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& settings,
               TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz, ChatMode chatMode, bool chatDiagnostics,
-              bool autoRawThreshold) {
+              bool autoRawThreshold,bool multiRawHistory) {
     if(!labStop()) return false;
+    const bool historyRequested=mode==LabMode::Raw&&multiRawHistory;
+    if(historyRequested) {
+        if(rawTraceBank){status("Release debug trace before history");return false;}
+        if(rawHistory.size()){status("Clear retained history before new listen");return false;}
+        if(!rawHistoryBank)rawHistoryBank=static_cast<int32_t*>(heap_caps_malloc(capture_history::kBankPulses*sizeof(int32_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+        if(!rawHistoryBank||!rawHistory.bind(rawHistoryBank,capture_history::kBankPulses)){status("No internal RAM for history");return false;}
+        rawHistoryDuplicates=rawHistoryDiscarded=0;
+    } else if(!rawHistory.size()&&rawHistoryBank) {
+        rawHistory.unbind();heap_caps_free(rawHistoryBank);rawHistoryBank=nullptr;
+    }
+    activeRawHistory=historyRequested;historyCandidateStored=false;
     if(mode==LabMode::Raw&&!capture) {
         capture=static_cast<int32_t*>(heap_caps_malloc(kWaveformCapacity*sizeof(int32_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
         if(!capture){status("No RAM for RAW bank");return false;}
@@ -673,6 +768,7 @@ bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& set
     if(mode==LabMode::Raw){portENTER_CRITICAL(&lock);rawTrace.reset();portEXIT_CRITICAL(&lock);}
     activePower = powerIndex <= 2 ? powerIndex : 0; stepHz = sweepStepHz;
     memset(&state, 0, sizeof(state)); captured = 0;
+    publishCaptureHistory();
     LabEvent event=LabEvent::Stop;
     switch(mode){case LabMode::Monitor:event=LabEvent::StartMonitor;break;case LabMode::Raw:event=LabEvent::StartRaw;break;
     case LabMode::Sweep:event=LabEvent::StartSweep;break;case LabMode::Explorer:event=LabEvent::StartExplorer;break;
@@ -748,8 +844,23 @@ size_t labCopyPulses(int32_t* output, size_t capacity) {
     if(n)memcpy(output, capture, n * sizeof(*output));
     return n;
 }
+size_t labCopyCaptureHistory(size_t index,int32_t* output,size_t capacity,
+                            RegisterImage& image,RadioSettings& settings) {
+    if(workerHandle||!output)return 0;
+    const auto* entry=rawHistory.entry(index);const int32_t* pulses=rawHistory.pulses(index);
+    if(!entry||!entry->valid||!pulses||capacity<entry->count)return 0;
+    memcpy(output,pulses,entry->count*sizeof(*output));
+    image=rawHistoryImages[index];settings=rawHistorySettings[index];return entry->count;
+}
+bool labClearCaptureHistory() {
+    if(workerHandle)return false;
+    rawHistory.unbind();
+    if(rawHistoryBank){heap_caps_free(rawHistoryBank);rawHistoryBank=nullptr;}
+    rawHistoryDuplicates=rawHistoryDiscarded=0;activeRawHistory=false;publishCaptureHistory();return true;
+}
 bool labRawTraceEnable(bool enabled) {
     if(workerHandle)return false;
+    if(enabled&&rawHistoryBank)return false;
     if(enabled&&!rawTraceBank) {
         rawTraceBank=static_cast<RawTraceEntry*>(heap_caps_malloc(kRawTraceCapacity*sizeof(RawTraceEntry),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
         if(!rawTraceBank)return false;
