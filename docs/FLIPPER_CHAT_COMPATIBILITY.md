@@ -1,10 +1,11 @@
 # Flipper plaintext chat compatibility
 
-Radio Lab's chat has two selectable wire formats. **ESP ACK** uses the framed
-ESP-HACK protocol and its companion FAP. **Flipper plaintext** uses the stock
-Flipper CLI / Enhanced Sub-GHz Chat plaintext stream. Select the same mode and
-frequency on the participants. Switching mode restarts the radio worker and
-clears the displayed chat history.
+Radio Lab's chat starts in **Flipper plaintext**, matching the user's Unleashed
+chat setup. This mode uses the stock Flipper CLI / Enhanced Sub-GHz Chat
+plaintext stream. **ESP ACK** remains selectable for the framed ESP-HACK
+protocol and its companion FAP. Select the same mode and frequency on the
+participants. Switching mode restarts the radio worker and clears the displayed
+chat history.
 
 | Mode | Peer | Delivery meaning |
 |---|---|---|
@@ -13,8 +14,10 @@ clears the displayed chat history.
 
 ## Open a compatible peer
 
-1. On ESP32, open **SubGHz → Radio Lab → Sub-GHz Chat** and select
-   **Mode: Flipper plain**. Choose the matching frequency in Radio Settings.
+1. Choose the matching frequency in Radio Settings, then open
+   **SubGHz → Radio Lab → Sub-GHz Chat** on ESP32. It starts in
+   **Flipper plaintext**; the mode item shows **Mode: Flipper plain**.
+   Pressing that mode item switches formats, so leave it unchanged for Unleashed.
 2. For official firmware 1.5.1, connect the Flipper CLI and run
    `subghz chat 433920000 0` for its internal radio. Alternatively open
    Enhanced Sub-GHz Chat, choose the same frequency and **No encryption**.
@@ -32,6 +35,30 @@ selects Enhanced chat source commit
 [plaintext send path](https://github.com/xMasterX/all-the-plugins/blob/1066d17ad1e8fbf75cea5c6612d79ba539ec8a33/apps_source_code/esubghz_chat/esubghz_chat.c)
 appends CRLF. Enhanced encrypted messages are unsupported here. This reference
 does not establish compatibility with every future app/firmware revision.
+
+## Verified Unleashed sources
+
+The checked stable firmware is
+[Unleashed unlshd-094](https://github.com/DarkFlippers/unleashed-firmware/releases/tag/unlshd-094),
+released on 2026-10-14 at commit
+`2f62b3ab5d767c41e09ab17c6b5fbd175c8c4c85`. Its
+[chat worker](https://github.com/DarkFlippers/unleashed-firmware/blob/2f62b3ab5d767c41e09ab17c6b5fbd175c8c4c85/lib/subghz/subghz_tx_rx_worker.c)
+loads GFSK9_99Kb and splits the stream into packets of at most 60 bytes. Its
+[CC1101 preset](https://github.com/DarkFlippers/unleashed-firmware/blob/2f62b3ab5d767c41e09ab17c6b5fbd175c8c4c85/lib/subghz/devices/cc1101_configs.c)
+has the matching RF parameters listed below.
+
+Unleashed's linked
+[application pack release 18oct2026](https://github.com/xMasterX/all-the-plugins/releases/tag/18oct2026)
+is pinned to `1aa52e2a30efaf3f16d59abce9803d9b0f769972`. The release index lists
+`esubghz_chat` in the extra pack, and its
+[app manifest](https://github.com/xMasterX/all-the-plugins/blob/1aa52e2a30efaf3f16d59abce9803d9b0f769972/apps_source_code/esubghz_chat/application.fam)
+identifies **Enhanced Sub-Ghz Chat v1.2**. Its
+[No encryption selector](https://github.com/xMasterX/all-the-plugins/blob/1aa52e2a30efaf3f16d59abce9803d9b0f769972/apps_source_code/esubghz_chat/scenes/esubghz_chat_key_menu.c)
+disables encryption; its
+[send path](https://github.com/xMasterX/all-the-plugins/blob/1aa52e2a30efaf3f16d59abce9803d9b0f769972/apps_source_code/esubghz_chat/esubghz_chat.c)
+then appends CRLF and passes the bytes to that firmware transport. These sources
+match the ESP32 plaintext format. The user's installed Unleashed version is
+unknown, and this source comparison does not replace a physical RF test.
 
 ## Radio and text format
 
