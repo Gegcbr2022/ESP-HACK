@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <ELECHOUSE_CC1101_SRC_DRV.h>
 
 extern bool inMenu;
 void returnToMainMenu();
@@ -56,6 +57,8 @@ bool up, down, ok, back, holdOk, holdBack, holdUp, holdDown;
 bool serialChatContext, serialChatListen, serialChatReported, serialChatCloseRequested;
 bool serialChatOpenPending;
 bool serialChatEditPending, serialChatEditing;
+bool serialCaptureContext, serialCaptureOpenPending, serialCaptureSavePending, serialCaptureCloseRequested;
+char captureSavedPath[112]="";
 
 __attribute__((noinline)) void printChatStatus() {
     const LabSnapshot s=labSnapshot();
@@ -83,7 +86,7 @@ __attribute__((noinline)) void printChatStatus() {
 }
 
 void input() {
-    if(serialChatContext)radioLabSerialPoll();
+    if(serialChatContext || serialCaptureContext)radioLabSerialPoll();
     buttonUp.tick(); buttonDown.tick(); buttonOK.tick(); buttonBack.tick();
     up = buttonUp.isClick(); down = buttonDown.isClick();
     ok = buttonOK.isClick(); back = buttonBack.isClick();
@@ -91,7 +94,7 @@ void input() {
     holdUp = buttonUp.isHolded(); holdDown = buttonDown.isHolded();
     // A serial close unwinds the same nested chat dialogs as a held BACK.
     // Suppress simultaneous selection so closing cannot queue another send.
-    if(serialChatContext && serialChatCloseRequested) {
+    if((serialChatContext && serialChatCloseRequested) || (serialCaptureContext && serialCaptureCloseRequested)) {
         up = down = ok = holdOk = holdUp = holdDown = false; back = holdBack = true;
     }
     delay(2);
@@ -303,27 +306,43 @@ bool selectPreset(size_t index) {
     settings.rxTimeoutMs = previous.rxTimeoutMs; settings.txLimitMs = previous.txLimitMs;
     radio = next; snprintf(activePreset, sizeof(activePreset), "%s", p->name); return true;
 }
-bool startMode(LabMode mode) {
-    if(!labStart(mode, radio, settings, profile, powerIndex, sweepStep, chatFormat)) { showNotice("Worker start failed"); return false; }
+bool startMode(LabMode mode, bool autoRawThreshold=false) {
+    if(!labStart(mode, radio, settings, profile, powerIndex, sweepStep, chatFormat, false, autoRawThreshold)) { showNotice("Worker start failed"); return false; }
     return true;
 }
-void saveCapture() {
-    if(!labStop()) { showNotice("Radio still active"); return; }
+bool saveCapture() {
+    if(!labStop()) { showNotice("Radio still active"); return false; }
     LabSnapshot s = labSnapshot();
-    if(!s.captureTriggered||!s.captureComplete){showNotice("No complete RSSI-triggered burst");return;}
-    if(s.dropped || s.captureFull || s.rejected) { showNotice("Damaged/full capture: not saved"); return; }
+    if(!s.captureTriggered||!s.captureComplete){showNotice("No complete RSSI-triggered burst");return false;}
+    if(s.dropped || s.captureFull || s.rejected) { showNotice("Damaged/full capture: not saved"); return false; }
     waveformCount = labCopyPulses(waveform, kWaveformCapacity);
     char path[112];
     if(!waveformCount) showNotice("No pulses captured");
-    else if(uniquePath(path, sizeof(path), "/subghz", "LabRAW") && saveWave(path)) showNotice(path);
+    else if(uniquePath(path, sizeof(path), "/subghz", "LabRAW") && saveWave(path)) {
+        snprintf(captureSavedPath,sizeof(captureSavedPath),"%s",path);showNotice(path);return true;
+    }
     else showNotice("SD save failed");
+    return false;
 }
-void captureApp(bool protocol) {
+const char* captureProgressText(const LabSnapshot& s) {
+    if(s.captureFull)return "Сигнал длиннее лимита";
+    if(s.dropped||s.rejected)return "Помеха: повтор приёма";
+    if(!s.active&&!s.captureComplete)return !s.connected||!s.rawThresholdReady?"Ошибка приёма: назад":"Приём окончен: повтор";
+    if(!s.rawThresholdReady)return "Настройка по шуму...";
+    return s.captureComplete?"Принято: OK записать":s.captureTriggered?"Запись сигнала...":"Ждём кнопку пульта";
+}
+void captureApp(bool protocol, bool autoThreshold=false) {
     if(settings.packetFormat != PacketFormat::Async) { message("Приём RAW", "Выберите сигнал AM/FM\nв настройках приёма."); return; }
-    if(!startMode(LabMode::Raw)) return;
+    if(!startMode(LabMode::Raw, autoThreshold)) {message("Приём RAW","Ошибка приёма: назад");return;}
     resetInput();
     while(true) {
         input(); if(back || holdBack) break;
+        if(serialCaptureContext && serialCaptureSavePending) {
+            serialCaptureSavePending=false;
+            if(saveCapture())Serial.printf("[Capture] SAVED path=%s pulses=%lu\n",captureSavedPath,(unsigned long)waveformCount);
+            else Serial.printf("[Capture] ERROR save=%s\n",notice);
+            continue;
+        }
         if(ok) {
             saveCapture();const char* result=notice;
             if(!strcmp(notice,"No complete RSSI-triggered burst"))result="Нет целого сигнала.\nНажмите кнопку пульта\nи дождитесь приёма.";
@@ -341,8 +360,8 @@ void captureApp(bool protocol) {
                 const size_t n = labCopyPulses(waveform, kWaveformCapacity); DecodedSignal decoded;
                 if(decodeLabOok(waveform, n, decoded)) { snprintf(b, sizeof(b), "LAB-OOK24: %04lX CRC OK", (unsigned long)decoded.payload); line(4, b); }
                 else line(4, "Ожидание LAB-OOK24");
-            } else line(4,s.captureComplete?"Принято: OK записать":s.captureTriggered?"Запись сигнала...":"Ждём кнопку пульта");
-            footer("OK:запись BACK:выход"); display.display();
+            } else line(4,captureProgressText(s));
+            footer(s.active||s.captureComplete?"OK:запись BACK:выход":"BACK:назад"); display.display();
         }
     }
     labStop(); resetInput();
@@ -530,6 +549,19 @@ void fileActions(const char* path,bool presetMode) {
     }
     resetInput();
 }
+__attribute__((noinline)) bool printPlaybackRadioState(const char* phase) {
+    const uint32_t before=ELECHOUSE_cc1101.spiTimeouts();
+    uint8_t freq[3],pa[8];
+    for(size_t i=0;i<3;++i)freq[i]=ELECHOUSE_cc1101.SpiReadReg(0x0D+i);
+    ELECHOUSE_cc1101.SpiReadBurstReg(0x3E,pa,sizeof(pa));
+    uint8_t marc=ELECHOUSE_cc1101.SpiReadStatus(0x35)&0x1F;
+    for(unsigned retry=0;retry<5;++retry){const uint8_t next=ELECHOUSE_cc1101.SpiReadStatus(0x35)&0x1F;if(next==marc)break;marc=next;}
+    const bool ready=ELECHOUSE_cc1101.spiReady()&&ELECHOUSE_cc1101.spiTimeouts()==before;
+    Serial.printf("[RFState] phase=%s FREQ=%02X%02X%02X MARC=%02X PA=",phase,freq[0],freq[1],freq[2],marc);
+    for(size_t i=0;i<sizeof(pa);++i)Serial.printf("%02X",pa[i]);
+    Serial.printf(" spiReady=%u miso=%lu\n",ready,(unsigned long)ELECHOUSE_cc1101.spiTimeouts());
+    return ready;
+}
 const char* prepareOpenedFileSend(StaticSubWaveform& generated) {
     if(!openedFileValid)return "Сначала откройте файл.";
     if(openedInfo.kind==SubKind::Key) {
@@ -583,7 +615,10 @@ void sendOpenedFile(const char* path) {
         input();if(back||holdBack)break;
         if(holdOk) {
             uint32_t elapsed=0;int32_t timingError=0;
-            const bool sent=labTransmitRaw(waveform,waveformCount,openedInfo.radio,openedInfo.frequencyHz,playbackProfile,playbackPower,5000,elapsed,timingError);
+            const bool beforeReady=printPlaybackRadioState("file-before");
+            const bool transmitted=beforeReady&&labTransmitRaw(waveform,waveformCount,openedInfo.radio,openedInfo.frequencyHz,playbackProfile,playbackPower,5000,elapsed,timingError);
+            const bool afterReady=printPlaybackRadioState("file-after");
+            const bool sent=transmitted&&afterReady;
             char result[200];snprintf(result,sizeof(result),"%s\n%lu мс\nПриём устройством\nне подтверждён.",sent?"Передача завершена.":"Не передано: ошибка\nили остановка BACK.",(unsigned long)(elapsed/1000));
             message("Отправка",result);break;
         }
@@ -945,7 +980,7 @@ void runRadioLab() {
     const size_t count=sizeof(apps)/sizeof(apps[0]);size_t selected=0;resetInput();
     while(true){
         input();if(back||holdBack)break;if(up)selected=(selected+count-1)%count;if(down)selected=(selected+1)%count;
-        if(ok){switch(selected){case 0:if(settings.packetFormat!=PacketFormat::Async)selectPreset(0);captureApp(false);break;case 1:browser(false,false,true);break;case 2:chatApp();break;case 3:simpleRadioSettings();break;case 4:radioLabAdvanced();break;}resetInput();}
+        if(ok){switch(selected){case 0:if(settings.packetFormat!=PacketFormat::Async)selectPreset(0);captureApp(false,true);break;case 1:browser(false,false,true);break;case 2:chatApp();break;case 3:simpleRadioSettings();break;case 4:radioLabAdvanced();break;}resetInput();}
         if(frame()){char heading[40];snprintf(heading,sizeof(heading),"Радио %lu.%03lu",(unsigned long)(settings.frequencyHz/1000000),(unsigned long)((settings.frequencyHz/1000)%1000));title(heading);for(size_t row=0;row<4;++row){size_t i=(selected+row)%count;display.setCursor(0,17+row*9);display.print(row?"  ":"> ");ui_text::print(display,apps[i]);}footer("UP/DN выбор OK:вход");display.display();}
     }
     // Ownership cannot pass back to legacy code until the worker has stopped.
@@ -991,7 +1026,7 @@ namespace {
 // reserved by radioLabSerialPoll() while it calls the send/queue path.
 __attribute__((noinline)) bool serialRadioWorkerActive() { return research::labSnapshot().active; }
 __attribute__((noinline)) bool serialChatMainIdle() {
-    return inMenu && !serialChatContext && !serialChatListen && !serialRadioWorkerActive();
+    return inMenu && !serialChatContext && !serialCaptureContext && !serialChatListen && !serialRadioWorkerActive();
 }
 __attribute__((noinline)) bool serialChatCanSend() {
     if(!serialChatContext || serialChatCloseRequested)return false;
@@ -1063,6 +1098,47 @@ __attribute__((noinline)) void startSerialChatListen(const char* command) {
         if(!serialChatListen)restoreReceiveMode();
     }
 }
+__attribute__((noinline)) void printCaptureStatus() {
+    const LabSnapshot s=labSnapshot();
+    Serial.printf("[Capture] context=%u active=%u mode=%u freq=%lu auto=%u ready=%u threshold=%d noise=%d baselineSamples=%u rssi=%d peak=%d\n",
+        serialCaptureContext,s.active,unsigned(s.mode),(unsigned long)s.frequencyHz,s.rawThresholdAuto,s.rawThresholdReady,
+        s.rawThresholdDbm,s.rawNoiseDbm,s.rawThresholdSamples,s.rssiDbm,s.peakDbm);
+    Serial.printf("[Capture] triggered=%u complete=%u full=%u pulses=%lu edges=%lu dropped=%lu rejected=%lu tail=%lu samples=%lu spi=%lu miso=%lu timeouts=%lu status=%s\n",
+        s.captureTriggered,s.captureComplete,s.captureFull,(unsigned long)s.pulseCount,(unsigned long)s.edgeCount,
+        (unsigned long)s.dropped,(unsigned long)s.rejected,(unsigned long)s.captureTailDiscarded,(unsigned long)s.samples,
+        (unsigned long)s.spiErrors,(unsigned long)s.misoTimeouts,(unsigned long)s.timeouts,s.status);
+    if(captureSavedPath[0])Serial.printf("[Capture] saved=%s\n",captureSavedPath);
+    Serial.printf("[Capture] rearms=%lu short=%lu armingDropped=%lu armingRejected=%lu\n",(unsigned long)s.captureRearms,(unsigned long)s.captureShortDiscarded,(unsigned long)s.captureArmingDropped,(unsigned long)s.captureArmingRejected);
+}
+__attribute__((noinline)) void runSerialCaptureUi() {
+    if(!labStop()){Serial.println("[Capture] ERROR previous radio worker did not stop");return;}
+    suspendLegacyReceive();
+    {
+        struct RestoreUi {
+            RadioSettings savedSettings;RegisterImage savedRadio;TxProfile savedProfile;uint8_t savedPower;
+            char savedPreset[sizeof(activePreset)];
+            RestoreUi():savedSettings(settings),savedRadio(radio),savedProfile(profile),savedPower(powerIndex){memcpy(savedPreset,activePreset,sizeof(savedPreset));}
+            ~RestoreUi(){settings=savedSettings;radio=savedRadio;profile=savedProfile;powerIndex=savedPower;memcpy(activePreset,savedPreset,sizeof(savedPreset));}
+        } restoreUi;
+        RegisterImage prepared;RadioSettings requested;
+        if(!loadPreset("AM270",prepared)||!describeRadio(prepared,433920000,requested))Serial.println("[Capture] ERROR automatic radio profile");
+        else {
+            settings=requested;settings.rxTimeoutMs=30000;radio=prepared;profile=TxProfile::ReceiveOnly;powerIndex=0;
+            snprintf(activePreset,sizeof(activePreset),"AM270");captureSavedPath[0]=0;
+            serialCaptureContext=true;serialCaptureCloseRequested=false;serialCaptureSavePending=false;
+            Serial.println("[Capture] OPEN friendly auto-RSSI RX-only freq=433920000 limit=30000ms; no TX");
+            captureApp(false,true);
+            while(!labStop()){Serial.println("[Capture] waiting for radio stop");delay(10);}
+            serialCaptureContext=false;serialCaptureCloseRequested=false;serialCaptureSavePending=false;
+        }
+    }
+    restoreReceiveMode();
+}
+uint32_t stagedWaveformHash() {
+    uint32_t hash=2166136261UL;
+    for(size_t i=0;i<waveformCount;++i)for(unsigned byte=0;byte<4;++byte){hash^=(uint32_t(waveform[i])>>(byte*8))&0xFF;hash*=16777619UL;}
+    return hash;
+}
 __attribute__((noinline)) bool serialPrincetonTestFrequency(const char* command,uint32_t& frequencyHz) {
     if(!command)return false;
     if(!strcmp(command,"rftest princeton433")){frequencyHz=433920000;return true;}
@@ -1113,7 +1189,20 @@ __attribute__((noinline)) bool handleIdleSerialCommand(const char* command) {
             research::StaticSubWaveform generated={};const char* unsupported=prepareOpenedFileSend(generated);
             Serial.printf("[SUB] path=%s kind=%u protocol=%s frequency=%lu bits=%u pulses=%lu durationUs=%llu eligible=%u\n",path,unsigned(openedInfo.kind),openedInfo.protocol,(unsigned long)openedInfo.frequencyHz,openedInfo.bits,(unsigned long)openedInfo.raw.pulses,(unsigned long long)openedInfo.raw.durationUs,unsupported==nullptr);
             if(unsupported)Serial.printf("[SUB] reason=%s\n",unsupported);
+            Serial.printf("[SUB] staged=%lu fnv32=%08lX\n",(unsigned long)waveformCount,(unsigned long)stagedWaveformHash());
         } else Serial.printf("[SUB] ERROR %s\n",notice);
+    }
+    else if(!strncmp(command,"subdump ",8)) {
+        const char* path=command+8;
+        if(!inMenu||!safePath(path))Serial.println("[SUBDump] ERROR idle main menu and valid /subghz/ path required");
+        else if(!inspectFile(path))Serial.printf("[SUBDump] ERROR %s\n",notice);
+        else if(openedInfo.kind!=SubKind::Raw||openedInfo.raw.pulses>kWaveformCapacity||waveformCount!=openedInfo.raw.pulses)
+            Serial.println("[SUBDump] ERROR requires complete RAW of at most2048 intervals");
+        else {
+            Serial.printf("[SUBDump] BEGIN pulses=%lu freq=%lu fnv32=%08lX\n",(unsigned long)waveformCount,(unsigned long)openedInfo.frequencyHz,(unsigned long)stagedWaveformHash());
+            for(size_t i=0;i<waveformCount;++i){if(i%16==0)Serial.printf("[SUBRAW] ");Serial.printf("%ld%s",(long)waveform[i],i%16==15||i+1==waveformCount?"\n":" ");if(i%16==15)delay(1);}
+            Serial.println("[SUBDump] END");
+        }
     }
     else if(!strcmp(command,"rflisten433")) {
         if(!inMenu)Serial.println("[RFListen] busy: return to the main menu");
@@ -1143,7 +1232,9 @@ __attribute__((noinline)) bool handleIdleSerialCommand(const char* command) {
             research::StaticSubWaveform generated={};waveformCount=0;
             const auto encoded=research::encodeStaticSub(known,waveform,research::kWaveformCapacity,generated);
             uint32_t elapsed=0;int32_t timing=0;bool sent=false;suspendLegacyReceive();
-            if(encoded==research::StaticSubError::None)sent=research::labTransmitRaw(waveform,generated.count,known.radio,known.frequencyHz,research::TxProfile::FilePlayback,1,5000,elapsed,timing);
+            const bool beforeReady=printPlaybackRadioState("test-before");
+            if(encoded==research::StaticSubError::None&&beforeReady)sent=research::labTransmitRaw(waveform,generated.count,known.radio,known.frequencyHz,research::TxProfile::FilePlayback,1,5000,elapsed,timing);
+            const bool afterReady=printPlaybackRadioState("test-after");sent=sent&&afterReady;
             restoreReceiveMode();
             Serial.printf("[RFTest] %s Princeton A53A53 freq=%lu repeats=6 nominal=0dBm intervals=%u expectedUs=%lu elapsedUs=%lu deltaUs=%ld\n",sent?"PASS":"FAIL",(unsigned long)testFrequency,unsigned(generated.count),(unsigned long)generated.durationUs,(unsigned long)elapsed,(long)timing);
         }
@@ -1175,8 +1266,21 @@ void radioLabSerialPoll() {
         if(c=='\n') {
             command[used]=0;
             if(overflow)Serial.println("[Chat] ERROR command too long");
+            else if(!strcmp(command,"captureopen")) {
+                if(serialCaptureOpenPending||serialChatOpenPending||!serialChatMainIdle())Serial.println("[Capture] ERROR busy; captureopen requires the idle main menu");
+                else {serialCaptureOpenPending=true;used=0;overflow=false;command[0]=0;Serial.println("[Capture] open request queued");return;}
+            }
+            else if(!strcmp(command,"capturestat"))printCaptureStatus();
+            else if(!strcmp(command,"capturesave")) {
+                if(!serialCaptureContext||serialCaptureCloseRequested||serialCaptureSavePending)Serial.println("[Capture] ERROR save requires an open capture UI");
+                else {serialCaptureSavePending=true;Serial.println("[Capture] save request queued");}
+            }
+            else if(!strcmp(command,"captureclose")) {
+                if(!serialCaptureContext)Serial.println("[Capture] ERROR no capture UI is open");
+                else {serialCaptureCloseRequested=true;serialCaptureSavePending=false;labRequestStop();Serial.println("[Capture] close requested");}
+            }
             else if(!strcmp(command,"chatopen")) {
-                if(serialChatOpenPending || !serialChatMainIdle())
+                if(serialChatOpenPending || serialCaptureOpenPending || !serialChatMainIdle())
                     Serial.println("[Chat] ERROR busy; chatopen requires the idle main menu");
                 else {
                     // Opening a UI from this frame keeps the UART stack alive
@@ -1206,15 +1310,21 @@ void radioLabSerialPoll() {
             else if(!strcmp(command,"screen"))printSerialScreen();
             else if(!strcmp(command,"chatstop")) {research::labRequestStop();Serial.println("[Chat] stop requested");}
             else if(!strncmp(command,"chatlisten ",11))startSerialChatListen(command);
-            else if((serialChatContext||serialRadioWorkerActive())&&used)Serial.println("[Chat] busy: use chatstat, screen, chatedit, chatsend TEST123, chatclose or chatstop");
+            else if((serialChatContext||serialCaptureContext||serialRadioWorkerActive())&&used)Serial.println("[RadioLab] busy: use context status/save/close or screen");
             else if(handleIdleSerialCommand(command)){}
-            else if(used)Serial.println("[RadioLab] commands: chatopen, chatedit, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfcal, rfcal ppm <signed decimal>, rfclock, rflisten433, rftest princeton433 or princeton <Hz>, sublist /subghz, subinspect /subghz/file.sub, appsdiag, APP_PUT");
+            else if(used)Serial.println("[RadioLab] commands: captureopen/stat/save/close, chatopen, chatedit, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfcal, rfcal ppm <signed decimal>, rfclock, rflisten433, rftest princeton433 or princeton <Hz>, sublist /subghz, subinspect or subdump /subghz/file.sub, appsdiag, APP_PUT");
             used=0;overflow=false;
         } else if(!overflow&&c>=32&&c<=126&&size_t(used)+1<sizeof(command))command[used++]=c;
         else overflow=true;
     }
 }
 __attribute__((noinline)) void radioLabHandlePending() {
+    if(serialCaptureOpenPending) {
+        serialCaptureOpenPending=false;
+        if(!serialChatMainIdle()){Serial.println("[Capture] ERROR busy; deferred captureopen requires the idle main menu");return;}
+        inMenu=false;runSerialCaptureUi();returnToMainMenu();
+        Serial.println("[Capture] CLOSED; main menu restored");return;
+    }
     if(!serialChatOpenPending)return;
     serialChatOpenPending=false; // Consume once, including a failed idle recheck.
     if(!serialChatMainIdle()) {
