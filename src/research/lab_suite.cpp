@@ -7,6 +7,7 @@
 #include "lua_apps.h"
 #include "chat_profile.h"
 #include "static_sub_encoder.h"
+#include "file_page.h"
 #include "../interface/ui_text.h"
 #include "../../shared/flipper_chat_compat.h"
 #include "../../shared/chat_session.h"
@@ -33,7 +34,9 @@ size_t waveformCount;
 SubInfo openedInfo;
 char paths[40][112];
 bool pathIsDir[40];
+bool pathIsNextPage[40], folderOpenError;
 size_t pathCount;
+uint32_t filePage, longPathCount;
 char activePreset[64] = "AM270";
 char currentFolder[112] = "/subghz";
 char filter[32] = "";
@@ -337,17 +340,33 @@ void analyzerApp(bool protocol) {
     resetInput();
 }
 void listFiles() {
-    pathCount=0; File folder=SD.open(currentFolder); if(!folder) return;
-    File item;
-    while((item=folder.openNextFile()) && pathCount<40) {
-        const char* name=item.name(); const char* leaf=strrchr(name,'/'); leaf=leaf?leaf+1:name;
-        if(*leaf!='.' && (!*filter || strstr(leaf,filter))) {
-            snprintf(paths[pathCount],sizeof(paths[0]),"%s/%s",currentFolder,leaf);
-            pathIsDir[pathCount]=item.isDirectory(); ++pathCount;
+    // At most39 actual paths plus one explicit navigation row. A second scan
+    // is needed only when a deletion made the requested last page disappear.
+    for(unsigned pass=0;pass<2;++pass) {
+        pathCount=0;longPathCount=0;folderOpenError=false;
+        memset(pathIsNextPage,0,sizeof(pathIsNextPage));
+        File folder=SD.open(currentFolder);if(!folder){folderOpenError=true;return;}
+        FilePage page(filePage);File item;unsigned scanned=0;
+        while((item=folder.openNextFile())) {
+            const char* name=item.name();const char* leaf=name?strrchr(name,'/'):nullptr;leaf=leaf?leaf+1:name;
+            if(leaf&&*leaf&&*leaf!='.'&&(!*filter||strstr(leaf,filter))) {
+                char complete[sizeof(paths[0])];
+                if(!completeFilePath(complete,sizeof(complete),currentFolder,leaf)) {
+                    if(longPathCount!=UINT32_MAX)++longPathCount;
+                } else if(page.consider()) {
+                    memcpy(paths[pathCount],complete,strlen(complete)+1);
+                    pathIsDir[pathCount]=item.isDirectory();++pathCount;
+                }
+            }
+            item.close();if((++scanned&15)==0)delay(1);
         }
-        item.close();
+        folder.close();
+        if(filePage>page.lastPage()){filePage=page.lastPage();continue;}
+        if(page.more()) {
+            paths[pathCount][0]=0;pathIsDir[pathCount]=false;pathIsNextPage[pathCount]=true;++pathCount;
+        }
+        return;
     }
-    folder.close();
 }
 void metadataScreen() {
     char text[320];
@@ -398,11 +417,13 @@ void fileActions(const char* path,bool presetMode) {
                     if(!textEntry("Folder under /subghz",name,sizeof(name),"abcdefghijklmnopqrstuvwxyz0123456789_-"))continue;
                     if(!validLeaf(name)){message("Path","Invalid folder");continue;}
                     char folder[80];snprintf(folder,sizeof(folder),"/subghz/%s",name);SD.mkdir(folder);
-                    const char* leaf=strrchr(path,'/');snprintf(destination,sizeof(destination),"%s/%s",folder,leaf?leaf+1:path);
+                    const char* leaf=strrchr(path,'/');
+                    if(!completeFilePath(destination,sizeof(destination),folder,leaf?leaf+1:path)){message("Путь","Путь длиннее 111 байт.\nФайл не изменён.");continue;}
                 } else {
                     if(!textEntry("File name (no .sub)",name,sizeof(name),"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"))continue;
                     if(!validLeaf(name)){message("Path","Invalid file name");continue;}
-                    snprintf(destination,sizeof(destination),"%s/%s.sub",presetMode?"/subghz/presets":currentFolder,name);
+                    char leaf[sizeof(name)+4];snprintf(leaf,sizeof(leaf),"%s.sub",name);
+                    if(!completeFilePath(destination,sizeof(destination),presetMode?"/subghz/presets":currentFolder,leaf)){message("Путь","Путь длиннее 111 байт.\nФайл не изменён.");continue;}
                 }
                 bool valid=safePath(destination)&&!SD.exists(destination);
                 if(valid)valid=selected==5?duplicateFile(path,destination):SD.rename(path,destination);
@@ -487,17 +508,18 @@ void friendlyFileActions(const char* path) {
 }
 void browser(bool music=false,bool presets=false,bool friendly=false) {
     if(!labStop())return;
-    snprintf(currentFolder,sizeof(currentFolder),"%s",presets?"/subghz/presets":"/subghz");filter[0]=0;
+    snprintf(currentFolder,sizeof(currentFolder),"%s",presets?"/subghz/presets":"/subghz");filter[0]=0;filePage=0;
     listFiles();size_t selected=0;resetInput();
     while(true) {
         input();
         if(holdBack)break;
-        if(back){char* slash=strrchr(currentFolder,'/');if(slash&&slash>currentFolder+1){*slash=0;listFiles();selected=0;}else break;}
+        if(back){if(filePage){--filePage;listFiles();selected=0;}else{char* slash=strrchr(currentFolder,'/');if(slash&&slash>currentFolder+1){*slash=0;filePage=0;listFiles();selected=0;}else break;}}
         if(up&&pathCount)selected=(selected+pathCount-1)%pathCount;
         if(down&&pathCount)selected=(selected+1)%pathCount;
-        if(holdOk){if(textEntry("Search (empty=all)",filter,sizeof(filter))){listFiles();selected=0;}resetInput();}
+        if(holdOk){if(textEntry("Поиск: пусто = все",filter,sizeof(filter))){filePage=0;listFiles();selected=0;}resetInput();}
         if(ok&&pathCount) {
-            if(pathIsDir[selected]) {snprintf(currentFolder,sizeof(currentFolder),"%s",paths[selected]);listFiles();selected=0;}
+            if(pathIsNextPage[selected]) {if(filePage<UINT32_MAX)++filePage;listFiles();selected=0;resetInput();}
+            else if(pathIsDir[selected]) {memcpy(currentFolder,paths[selected],strlen(paths[selected])+1);filePage=0;listFiles();selected=0;}
             else if(music) {
                 if(inspectFile(paths[selected])) {
                     metadataScreen();
@@ -511,9 +533,11 @@ void browser(bool music=false,bool presets=false,bool friendly=false) {
             } else {char path[112];snprintf(path,sizeof(path),"%s",paths[selected]);if(friendly)friendlyFileActions(path);else fileActions(path,presets);listFiles();if(selected>=pathCount)selected=0;}
         }
         if(frame()) {
-            title(music?"Sub-GHz Music Lab":presets?"Saved Presets":friendly?"Файлы .sub":"Signal Manager");line(2,currentFolder);
-            for(size_t row=0;row<4;++row){size_t i=selected+row;if(i>=pathCount)break;const char* leaf=strrchr(paths[i],'/');display.setCursor(0,27+row*8);display.print(row?"  ":"> ");display.print(pathIsDir[i]?"/":"");ui_text::print(display,leaf?leaf+1:paths[i]);}
-            if(!pathCount)line(4,friendly?"Файлов пока нет":"No matching files");display.display();
+            char heading[64];snprintf(heading,sizeof(heading),"%s [%llu]",music?"Музыка":presets?"Пресеты":"Файлы",(unsigned long long)filePage+1);title(heading);ui_text::draw(display,0,13,currentFolder);
+            for(size_t row=0;row<3;++row){size_t i=selected+row;if(i>=pathCount)break;display.setCursor(0,25+row*9);display.print(row?"  ":"> ");if(pathIsNextPage[i])ui_text::print(display,"След. страница");else{const char* leaf=strrchr(paths[i],'/');display.print(pathIsDir[i]?"/":"");ui_text::print(display,leaf?leaf+1:paths[i]);}}
+            if(!pathCount)line(4,folderOpenError?"Папка не открылась":"Файлов пока нет");
+            if(longPathCount){char hint[48];snprintf(hint,sizeof(hint),"Путь>111Б:%lu",(unsigned long)longPathCount);footer(hint);}
+            else footer(filePage?"BACK:пред. держ:выход":"UP/DN OK:вход BACK");display.display();
         }
     }
     resetInput();
