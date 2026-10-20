@@ -30,6 +30,7 @@ struct MockSerial {
     }
 } Serial;
 static unsigned stopCalls,configureCalls,txStrobes,rmtStops,rmtUninstalls,rxEntries;
+static unsigned forbiddenWrites;
 static uint32_t transmittedWord,configureHz;
 static bool workerStopped=true,failConfigure=false,failIdle=false,failPower=false;
 static bool failAlloc=false,failConfig=false,failInstall=false,failTxState=false;
@@ -66,9 +67,12 @@ struct Driver {
     }
     bool spiReady()const{return !sticky;}
     uint32_t spiTimeouts()const{return timeouts;}
-    uint8_t SpiReadReg(uint8_t address){return io()?regs[address]:0;}
+    uint8_t SpiReadReg(uint8_t address){if(!io())return 0;if(address==0x2B)regs[address]+=0x23;return regs[address];}
     uint8_t SpiReadStatus(uint8_t){return io()?marc:0;}
-    void SpiWriteReg(uint8_t address,uint8_t value){if(io())regs[address]=restorationPhase&&corruptRestoreReg&&address==13?uint8_t(value^1):value;}
+    void SpiWriteReg(uint8_t address,uint8_t value){
+        if(address==0x29||address==0x2B){++forbiddenWrites;CHECK(false);}
+        if(io())regs[address]=restorationPhase&&corruptRestoreReg&&address==13?uint8_t(value^1):value;
+    }
     void SpiReadBurstReg(uint8_t,uint8_t* bytes,uint8_t count){std::memset(bytes,0,count);if(io())std::memcpy(bytes,pa,count);}
     void SpiWriteBurstReg(uint8_t,uint8_t* bytes,uint8_t count){if(io()){std::memcpy(pa,bytes,count);if(restorationPhase&&corruptRestorePa&&bytes[0])pa[0]^=1;}}
     void SpiStrobe(uint8_t command){
@@ -149,11 +153,12 @@ static void reset(uint8_t prior=13){
     failWrite=failPoll=cancelBack=cancelStop=runTimeout=failRmtStop=failUninstall=driverInstalled=restorationPhase=permanentSpi=false;
     corruptRestoreReg=corruptRestorePa=false;
     restoreFailAt=restoreIo=snapshotFailAt=snapshotIo=stopCalls=configureCalls=txStrobes=rmtStops=rmtUninstalls=rxEntries=0;
-    configureHz=transmittedWord=clockUs=0;rmtItems=nullptr;lastStatus.clear();Serial.output.clear();
+    configureHz=transmittedWord=clockUs=forbiddenWrites=0;rmtItems=nullptr;lastStatus.clear();Serial.output.clear();
 }
 static void checkPin(){CHECK(mux[4]==original.mux);CHECK(GPIO.pin[4].val==original.pin);CHECK(GPIO.func_out_sel_cfg[4].val==original.outSelect);CHECK(GPIO.enable==original.enable);CHECK(GPIO.out==original.out);}
 static void checkRestored(){
-    CHECK(!std::memcmp(original.regs,ELECHOUSE_cc1101.regs,47));CHECK(!std::memcmp(original.pa,ELECHOUSE_cc1101.pa,8));
+    for(unsigned i=0;i<47;++i)if(i!=0x29&&i!=0x2B)CHECK(original.regs[i]==ELECHOUSE_cc1101.regs[i]);
+    CHECK(!forbiddenWrites);CHECK(!std::memcmp(original.pa,ELECHOUSE_cc1101.pa,8));
     CHECK(ELECHOUSE_cc1101.marc==original.marc);checkPin();
     CHECK(activeSettings.frequencyHz==433920000&&stopRequested&&syncSeen&&rxArmedAt==123&&syncStarted==456);
     CHECK(!driverInstalled);

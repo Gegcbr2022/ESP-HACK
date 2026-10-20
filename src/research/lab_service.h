@@ -52,8 +52,9 @@ bool labDiscover();
 bool labReceiveMessage(uint16_t& source, char* text, size_t capacity);
 size_t labCopyPulses(int32_t* output, size_t capacity);
 // Stops/joins the worker. Exact user waveform, finite duration, manual BACK abort.
-// Physical config/PA/GDO mode and stable RX/IDLE are restored on every mutated
+// Physical writable config/PA/GDO mode and stable RX/IDLE are restored on every mutated
 // exit. Saved synthesizer bytes are restored directly, without reapplying trim.
+// TI-prohibited FSTEST/volatile AGCTEST test registers are snapshot-only.
 // A pre-existing TX/transient state is refused; restoration never resumes TX.
 bool labTransmitRaw(const int32_t* pulses, size_t count, const RegisterImage& image,
                     uint32_t frequencyHz, TxProfile profile, uint8_t powerIndex,
