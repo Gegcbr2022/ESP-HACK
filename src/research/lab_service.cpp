@@ -340,6 +340,37 @@ void drainRaw(TriggeredCapture& trigger, bool finishing = false) {
         trigger.pulse(pulse, endedAtUs);
     }
 }
+bool rawCaptureTick(TriggeredCapture& trigger,uint32_t& lastSample,uint32_t nowMs) {
+    drainRaw(trigger);
+    bool sampled=false;int16_t rssi=-127;
+    if(nowMs-lastSample>=1) {
+        rssi=sampleRawRssi();lastSample=nowMs;sampled=true;
+        if(!ELECHOUSE_cc1101.spiReady()) {
+            trigger.pulse(0,micros());errorCount(&LabSnapshot::spiErrors);
+            publishRaw(trigger,raw_capture::snapshot());status("SPI fault during RAW");return false;
+        }
+    }
+    // RSSI SPI can overlap an IRQ. Feed its actual ending timestamp before
+    // allowing the trigger policy to decide whether a quiet gap has elapsed.
+    drainRaw(trigger);
+    // Time must precede the atomic snapshot. Queued/future-ended intervals
+    // defer this decision; an IRQ after the snapshot is later than decisionUs.
+    const uint32_t decisionUs=micros();
+    const auto counters=raw_capture::snapshot();
+    trigger.integrity(counters.dropped,counters.rejected);
+    if(!counters.queued && int32_t(decisionUs-counters.lastEdgeUs)>=0) {
+        const bool wasTriggered=trigger.triggered();
+        if(sampled)trigger.rssi(rssi,decisionUs);
+        if(!wasTriggered&&trigger.triggered())status("Triggered: capturing one burst");
+        trigger.poll(decisionUs);
+    }
+    publishRaw(trigger,counters);
+    if(!trigger.terminal())return true;
+    if(trigger.full())status("RAW full: capture not saved");
+    else if(trigger.complete())status("One burst ready: OK to save");
+    else status("RAW damaged: capture not saved");
+    return false;
+}
 bool prepareRawThreshold() {
     if(!state.rawThresholdAuto)return true;
     status("Sampling noise: wait before remote");
@@ -471,26 +502,7 @@ void worker(void*) {
         if(mode == LabMode::Raw) {
             // Continuously drain noise into the bounded pretrigger window; it
             // cannot fill the2048-interval output bank before a real RSSI gate.
-            drainRaw(rawTrigger);
-            const auto s = raw_capture::snapshot();
-            rawTrigger.integrity(s.dropped, s.rejected);
-            if(now - lastSample >= 1) {
-                const bool wasTriggered = rawTrigger.triggered();
-                const int16_t rssi = sampleRawRssi(); lastSample = now;
-                if(!ELECHOUSE_cc1101.spiReady()) {
-                    rawTrigger.pulse(0, micros()); errorCount(&LabSnapshot::spiErrors);
-                    publishRaw(rawTrigger, s); status("SPI fault during RAW"); break;
-                }
-                rawTrigger.rssi(rssi, micros());
-                if(!wasTriggered && rawTrigger.triggered()) status("Triggered: capturing one burst");
-            }
-            rawTrigger.poll(micros()); publishRaw(rawTrigger, s);
-            if(rawTrigger.terminal()) {
-                if(rawTrigger.full()) status("RAW full: capture not saved");
-                else if(rawTrigger.complete()) status("One burst ready: OK to save");
-                else status("RAW damaged: capture not saved");
-                break;
-            }
+            if(!rawCaptureTick(rawTrigger,lastSample,now))break;
         } else if(mode == LabMode::Sweep) {
             const uint32_t hz = activeSettings.frequencyHz + uint32_t(bin) * stepHz;
             if(!supportedFrequency(hz)) { status("Sweep exceeds CC1101 band"); break; }
