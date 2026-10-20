@@ -1,0 +1,11 @@
+{
+  "name": "ESPHackLua54",
+  "version": "5.4.9",
+  "license": "MIT",
+  "description": "Official Lua 5.4.9 core and selected libraries for bounded SD apps",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src",
+    "flags": ["-DLUAI_MAXCCALLS=40"]
+  }
+}
