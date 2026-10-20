@@ -1,3 +1,21 @@
+# v1.3-rf-lab.3
+
+- File Send uses the exact nominal frequency in the file across the supported
+  CC1101 hardware bands. It no longer applies the chat's two-channel list to
+  file playback. Existing pulse, duration, modem and protocol checks remain.
+- File playback snapshots and restores physical CC1101 registers, its PA table,
+  GPIO routing and stable RX/IDLE state, including cancellation and error exits.
+  Saved synthesizer bytes are restored directly without applying trim twice.
+- Simple RAW recording prepares an automatic threshold from the background
+  RSSI. Advanced recording retains its manual threshold. Clean pretrigger
+  recovery and edge timing fixes prevent stale noise and timing reconstruction
+  from ending a later valid capture incorrectly.
+- Added bounded USB capture diagnostics that open the normal receive UI,
+  save through its existing SD path, and reopen recorded RAW data for checking.
+  These commands receive and inspect; opening them sends no RF signal.
+- Russian instructions: [file playback and recording](docs/FILE_PLAYBACK_RU.md).
+  Hardware validation for this update is recorded in the test report.
+
 # v1.3-rf-lab.2
 
 - Added Pocket as the default main menu: original category icons, three visible
