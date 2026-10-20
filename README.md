@@ -16,9 +16,17 @@ README is preserved in [README_UPSTREAM.md](README_UPSTREAM.md).
   timing reads, stale decoded payload packing and polling-based RAW capture.
 - Exact official Flipper1.5.1 AM270/AM650/FM238/FM476/FM12K presets, validated
   advanced settings and streaming `.sub` import/export with explicit errors.
+- File Send supports one bounded binary OOK RAW pass or six periods of
+  Princeton24 / CAME12/24. Dynamic protocols such as KeeLoq, Alutech and
+  StarLine remain inspection-only; unsupported files are refused explicitly.
+  Radio files use pages of 39 paths plus a separate Next Page row, preserving
+  complete paths rather than silently truncating them.
 - Radio Lab: receive, frequency/spectrum/RAW/protocol analysis, file and preset
   management, finite laboratory generator, Music Lab and detailed diagnostics.
-- Pocket main menu with icons, selection/scroll indicators and SD status;
+- Russian Pocket menus, basic settings labels, button hints and all eleven SD
+  apps; native Cyrillic font and bounded UTF-8 rendering. Advanced legacy
+  technical screens retain some English labels. Pocket has icons,
+  selection/scroll indicators and SD status;
   Pages, List, Wii and DSi remain selectable alongside Pocket.
 - Simple chat: automatic 433.920 MHz / Flipper plaintext / nominal 0 dBm setup
   for the authorized Faraday laboratory, with manual message sending and
@@ -36,7 +44,8 @@ README is preserved in [README_UPSTREAM.md](README_UPSTREAM.md).
 
 ## Use
 
-Main menu **SubGHz → Radio Lab** or **SD Apps**. See
+The default Russian menu opens **Радио SubGHz** directly into receive/files/chat/settings,
+with technical tools under **Дополнительно**. SD apps open through **Приложения SD**. See
 [the user guide](README_RF_LAB.md), [build/flashing instructions](docs/BUILD_AND_FLASH.md),
 [Russian quick start](docs/QUICK_START_RU.md), [app SDK](docs/APPS_SDK.md),
 [games](docs/SD_GAMES.md), [utilities](docs/SD_UTILITIES.md),
@@ -57,14 +66,16 @@ documented, not guessed.
 UP/DOWN selects, OK opens and BACK returns. In SD Apps, choose a group and an
 app; hold OK on an app for its information, then OK to star/unstar it. Hold BACK
 exits every running app. Change the main menu style under
-**Settings → Interface → Menu**.
+**Настройки → Интерфейс → Главное меню**.
 
-For chat, open **SubGHz → Radio Lab → Sub-GHz Chat**. Set the Flipper peer to
+For chat, open **Радио SubGHz → Чат Flipper**. Set the Flipper peer to
 433.920 MHz and **No encryption**. OK opens the send menu; choose TEST123,
-another quick message or Write message and confirm with OK. UP/DOWN reads
+another quick message or **Написать текст** and confirm with OK. UP/DOWN reads
 history; BACK leaves chat. **Sent** confirms local transmission, without a peer
-ACK in plaintext mode. The user reported failed physical reception in both
-directions on the preceding firmware; a successful exchange remains unresolved.
+ACK in plaintext mode. Physical reception still failed in both directions on
+the Russian `c5779ee` build. The connected Flipper was identified as Unleashed
+`unlshd-086e` (`e7e4e179`), with Enhanced Sub-Ghz Chat 1.2 in its SD backup.
+Successful interoperability remains unresolved.
 
 ## Validation boundaries
 
@@ -72,17 +83,25 @@ The release includes actual ESP32/FAP binaries and portable/mock test results.
 Compilation, a successful device flash and a CC1101 register probe do not prove
 RF sensitivity, timing, spectral compliance or Flipper interoperability. The
 test report separates observed results from pending physical tests. Other
-Radio Lab transmit functions require selecting the finite laboratory profile.
-Simple Chat temporarily applies its authorized Faraday profile automatically,
-ready for manual sends, then restores previous settings on exit. It sends no
-automatic beacon. Per-packet deadlines, packet spacing and a finite local
-airtime governor remain active. Frequency choices and nominal PA values are
-not a regional certification or measured RF power.
+The simple Chat and file Send screens temporarily apply the authorized Faraday
+profile at nominal 0 dBm, then restore previous settings. Both require a manual
+send action. File Send requires a fresh hold OK, preserves the exact file
+frequency, and accepts only 433.920/868.350 MHz, at most 2048 intervals and
+5 seconds per operation. Other Radio Lab transmit tools require selecting the
+laboratory profile explicitly. Chat additionally enforces packet deadlines,
+spacing and a 1-second/60-second attempt-time governor; this rolling budget is
+not a RAW playback governor. Frequency choices and nominal PA values are not
+a regional certification or measured RF power.
 
-Release 2 native tests pass under Windows Zig and Ubuntu GCC: 91,617 Lua checks
-with 16,500 app frames, 758,543 catalog checks and 22,235 menu/migration checks.
-Final device, RF and release-artifact evidence belongs to the
-[test report](docs/TEST_REPORT.md).
+Release 2 native tests pass under Windows Zig and Ubuntu GCC: 91,990 Lua checks
+with 16,500 app frames, 758,551 catalog checks and 21,892 menu/migration checks.
+Static encoders passed 800,843 checks; pagination passed 1,069,109 checks; the
+automatic chat profile passed 61 checks and the mock clock probe passed 246.
+The `c5779ee` CI run passed all three jobs, and all eleven Russian SD apps
+passed 120 diagnostic frames each on ESP32 with radio starts disabled.
+The later `4d1fd3a` candidate adds pagination and finite USB RF diagnostics;
+its final flash/probe and physical tests await the release owner's record.
+Exact source states and limits are in the [test report](docs/TEST_REPORT.md).
 
 Unrelated upstream applications remain available; their hardware behavior is
 outside the new test coverage.

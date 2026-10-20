@@ -9,13 +9,15 @@ original third-party license notices retained. Development branch:
 ## Start here
 
 The default **Pocket** main menu has category icons, three visible rows,
-selection/scroll indicators and SD status. **Settings → Interface → Menu**
-offers five styles: Pages, List, Wii, DSi and Pocket. Existing application
+selection/scroll indicators and SD status. **Настройки → Интерфейс → Главное меню**
+offers five styles: Страницы (Pages), Список (List), Wii, DSi and Pocket. Existing application
 category IDs and wiring remain unchanged; see [Pocket interface](docs/POCKET_UI.md).
-Open **SubGHz → Radio Lab** for radio tools. Its independent radio task keeps
+Open **Радио SubGHz** directly for the simple receive/files/chat/settings home;
+technical tools and the previous radio menu are under **Дополнительно**.
+Its independent radio task keeps
 display rendering and SD operations outside the GPIO edge ISR.
 
-Open **SD Apps** from the main menu to run Lua applications from `/apps`.
+Open **Приложения SD** from the main menu to run Lua applications from `/apps`.
 The launcher groups apps into All apps, Tools, Games, Radio, Favorites and
 Recent. Comment metadata supplies friendly titles, categories and descriptions;
 up to eight favorites and four recent apps persist on SD. Eleven source apps
@@ -43,7 +45,16 @@ receive-only radio measurements within bounded memory and callback budgets.
   not a calibrated analog oscilloscope axis.
 - **Signal Manager:** bounded folder browsing, current-folder text search,
   validation/metadata, rename, move, duplicate/export and explicit deletion.
-  A page holds 40 matching entries. Search narrows matches before that limit.
+  Each page holds 39 real paths plus a separate **След. страница** row when
+  more entries exist. BACK returns to the previous page before the parent
+  folder. Search and folder changes reset the page. Paths over 111 bytes are
+  visibly reported and omitted; complete UTF-8 names are never byte-truncated.
+- **File Send:** **Радио SubGHz → Файлы .sub → file → Отправить** supports
+  one binary OOK RAW pass (starts HIGH, at most 2048 intervals / 5 seconds),
+  Princeton24 or CAME12/24 (six periods). Exact file frequency and compatible
+  OOK configuration are required; unsupported or dynamic protocols are refused.
+  CAME's initial LOW is rotated to the period end for finite HIGH-first RMT
+  playback. See [supported static playback](docs/STATIC_SUB_PLAYBACK.md).
 - **Signal Generator:** one user-defined LAB-OOK24 payload with CRC-8. This is
   a finite generated test frame, not continuous RF output.
 - **Modulation Explorer:** compare four official receive presets with RSSI and
@@ -78,23 +89,32 @@ Radio Lab TX defaults off. In Radio Settings select **Shielded laboratory** for
 the intended controlled setup, then choose a nominal -10/0/+10 dBm setting.
 Opening the simple Chat screen temporarily applies its automatic 433.920 MHz /
 Flipper plaintext / nominal 0 dBm TX-ready profile for this authorized setup;
-messages still require a manual send action. Leaving Chat restores the previous
-settings. It does not send an automatic beacon.
+messages still require a manual send action. The simple file Send screen also
+temporarily selects ShieldedLab / nominal 0 dBm, for at most 5 seconds, without
+requiring a separate settings change. It requires a fresh hold OK; opening a
+file does not transmit. Both screens restore the previous settings on exit.
+Other transmit tools retain explicit profile selection.
 The new ESP32 TX policy allows only the explicit laboratory channels
 433.920/868.350 MHz and at most 5 seconds per RAW operation. Chat adds finite
 per-packet deadlines, a 100 ms gap and a local 1-second/60-second attempt-time
 governor. The Flipper
-also enforces the official firmware's regional TX permission. These are bounded
+also applies its installed firmware's TX permission settings. These are bounded
 laboratory profiles, not a Ukrainian regulatory certification. PA values and
 the antenna/matching network have not been measured. The profile resets to RX
 only on each Radio Lab launch; it is not written to SD as a TX authorization.
 
-The user reported failed reception in both ESP32/Flipper directions on the
-preceding firmware. Release 2 adds the simpler setup and packet/CRC/FIFO/state
-diagnostics; a successful RF exchange has not yet been established. Final
-release 2 image identification, flash verification and the eleven-app on-device
-diagnostic remain pending the release owner's recorded results. Historical
-release 1 flash/probe/app evidence is kept separately in the test report.
+The user confirmed failed reception in both ESP32/Flipper directions on the
+Russian `c5779ee` build. The connected peer is Unleashed `unlshd-086e`
+(`e7e4e179`); its backed-up Enhanced Sub-Ghz Chat 1.2 uses API 87.6 and delegates
+the radio worker to that firmware. Source/profile checks have not established
+the physical cause or a successful exchange. The supplied ESP ACK companion
+FAP built for official 1.5.1/API 88.2 is a separate application.
+
+All eleven Russian SD apps passed 120 diagnostic input/tick/draw frames each on
+the `c5779ee` ESP32 build with radio starts disabled. Its three-job CI run also
+passed. The later `4d1fd3a` candidate adds file pagination and finite USB RF
+diagnostics; its final flash/probe and physical results remain pending. Earlier
+release 1 evidence and exact source states are separated in the test report.
 
 ## Build, test, flash and rollback
 
@@ -114,10 +134,14 @@ upstream history and incremental development commits. Public fork:
 - [Feature status and limitations](docs/FEATURE_STATUS.md)
 - [Test report](docs/TEST_REPORT.md)
 
-Release 2 native checks pass on Windows Zig and Ubuntu GCC: 91,617 Lua checks
-with 16,500 sample frames across eleven apps, 758,543 catalog checks and 22,235
+Release 2 native checks pass on Windows Zig and Ubuntu GCC: 91,990 Lua checks
+with 16,500 sample frames across eleven apps, 758,551 catalog checks and 21,892
 menu/rendering/migration checks. These results cover software behavior and
 bounds; they do not establish physical OLED/button usability or RF performance.
+Additional suites passed 800,843 static encoder checks, 1,069,109 pagination
+checks, 61 automatic chat profile checks and 246 mock clock probe checks.
+Basic settings and new screens use Russian; remaining advanced legacy screens
+may retain English labels. Filenames and protocol identifiers are not translated.
 
 Compiled/native-tested behavior is distinct from physical RF validation. A
 successful flash, chip probe or OLED boot cannot establish receiver sensitivity,

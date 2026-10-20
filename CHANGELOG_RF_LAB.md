@@ -3,6 +3,17 @@
 - Added Pocket as the default main menu: original category icons, three visible
   rows, selection/scroll indicators and SD status. All five menu styles remain
   selectable. Appearance migration retains valid unrelated settings.
+- Added Russian Pocket/basic settings labels, new radio screens and all eleven
+  Lua apps, with an original Cyrillic font and safe UTF-8 clipping. Existing
+  technical protocol names and advanced legacy labels remain unchanged.
+- Opened the simple radio home directly from **Радио SubGHz**, with the old
+  radio menu and technical tools under **Дополнительно**.
+- Added file pages of 39 actual paths plus a separate Next Page row, previous
+  page navigation and complete-path checks; overlong paths are reported.
+- Added manual file Send for one binary OOK RAW pass or six periods of
+  Princeton24 / CAME12/24, preserving exact supported file frequency and modem
+  settings. CAME's leading LOW is explicitly rotated to the period end.
+  Dynamic protocols remain inspection-only; unsupported requests are refused.
 - Added a categorized SD launcher with All apps, Tools, Games, Radio, Favorites
   and Recent sections, bounded comment metadata, descriptions, eight favorites
   and four recent apps persisted on SD.
@@ -13,21 +24,30 @@
 - Simplified Chat into a read/send screen and quick-message menu. For the
   authorized Faraday setup, entry temporarily applies 433.920 MHz, Flipper
   plaintext and nominal 0 dBm with TX ready for manual sends. Exit restores
-  prior settings; no automatic beacon is transmitted. Other laboratory TX
-  functions retain their explicit profile selection. Enhanced peers must use
+  prior settings; no automatic beacon is transmitted. File Send also temporarily
+  selects the authorized lab profile / 0 dBm, requires a fresh hold OK, and is
+  limited to 2048 intervals / 5 seconds. Other transmit tools require explicit
+  profile selection. Chat's separate airtime governor remains active. Enhanced peers must use
   No encryption. ESP ACK mode and its companion FAP remain under Advanced.
 - Added clearer chat state/blocking reasons and packet/CRC/FIFO/state
   diagnostics for reproducing the user's failures in both RF directions.
-  Successful physical delivery is still unresolved; local Sent is not a peer
+  Both RF directions still failed on the Russian `c5779ee` build. Successful
+  physical delivery remains unresolved; local Sent is not a peer
   acknowledgement in plaintext mode. Finite TX governors remain active.
 - Expanded `appsdiag` to all eleven installed examples, up to 120 input/tick/draw
   frames per app with radio start disabled, followed by return to the main menu.
-  Device results are recorded separately in the test report.
-- Passed native suites on Windows Zig and Ubuntu GCC: 91,617 Lua checks and
-  16,500 sample frames, 758,543 catalog checks and 22,235 menu/migration checks.
+  All eleven Russian apps passed 120 frames each on the `c5779ee` ESP32 build;
+  this does not validate the RF dashboard's physical radio measurements.
+- Passed native suites on Windows Zig and Ubuntu GCC: 91,990 Lua checks and
+  16,500 sample frames, 758,551 catalog checks and 21,892 menu/migration checks.
   Game tests now release prior host-only assertion chunks before compiling
   another; twenty independent GCC runs passed without changing production
   memory limits or the normal-GC app frame tests.
+- Passed 800,843 static encoder, 1,069,109 pagination, 61 automatic chat profile
+  and 246 mock clock probe checks. Added finite idle-only USB clock diagnostics;
+  mock tests do not establish the installed module's crystal frequency.
+- All three CI jobs passed at `c5779ee`. Later candidate `4d1fd3a` adds pagination
+  and USB RF/file diagnostics; final device results await the release owner.
 
 See [Pocket UI](docs/POCKET_UI.md), [SD games](docs/SD_GAMES.md),
 [SD utilities](docs/SD_UTILITIES.md) and [test results](docs/TEST_REPORT.md).
