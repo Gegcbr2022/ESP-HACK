@@ -309,11 +309,18 @@ static bool example_test(const char* path,unsigned kind) {
     printf("Lua sample %s: peak %u/%u bytes\n",path,unsigned(vm.peak()),unsigned(sizeof bank));
     vm.close(); CHECK(vm.used()==0); return true;
 }
+#include "utilities_test.inc"
+#include "games_extra_test.inc"
 int main(int argc,char** argv) {
-    if(argc!=6) { fprintf(stderr,"Pass hello.lua stopwatch.lua rf_dashboard.lua snake.lua game2048.lua\n"); return 2; }
-    if(!allocator_tests()||!vm_tests()||!example_test(argv[1],0)||!example_test(argv[2],0)||!example_test(argv[3],1)||
-       !example_test(argv[4],2)||!example_test(argv[5],3)||
-       !snake_game_test(argv[4])||!game2048_test(argv[5])) return 1;
-    printf("Lua sandbox: %u checks passed (real Lua VM/allocator, quotas, APIs, callbacks, 7500 sample frames)\n",checks);
+    if(argc!=12) { fprintf(stderr,"Pass paths for all eleven shipped Lua apps\n"); return 2; }
+    if(!allocator_tests()||!vm_tests()) return 1;
+    for(int i=1;i<argc;++i) {
+        const unsigned kind=i==3?1:(i==1||i==2||i==4?0:3);
+        if(!example_test(argv[i],kind)) return 1;
+    }
+    if(!snake_game_test(argv[4])||!game2048_test(argv[5])||
+       !utility_tests(argv[6],argv[7],argv[8],argv[9])||
+       !blockfall_game_test(argv[10])||!mines_game_test(argv[11])) return 1;
+    printf("Lua sandbox: %u checks passed (real Lua VM/allocator, quotas, APIs, callbacks, %u sample frames)\n",checks,unsigned(argc-1)*1500);
     return 0;
 }
