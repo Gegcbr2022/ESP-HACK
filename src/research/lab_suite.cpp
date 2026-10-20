@@ -6,6 +6,7 @@
 #include "app_install.h"
 #include "lua_apps.h"
 #include "chat_profile.h"
+#include "static_sub_encoder.h"
 #include "../interface/ui_text.h"
 #include "../../shared/flipper_chat_compat.h"
 #include "../../shared/chat_session.h"
@@ -37,6 +38,8 @@ char activePreset[64] = "AM270";
 char currentFolder[112] = "/subghz";
 char filter[32] = "";
 char notice[80] = "";
+char fileErrorRu[160] = "";
+bool radioLabHomeOpen;
 uint32_t lastFrame;
 bool up, down, ok, back, holdOk, holdBack;
 bool serialChatContext, serialChatListen, serialChatReported, serialChatCloseRequested;
@@ -163,9 +166,10 @@ bool stagePulse(void* context, int32_t pulse) {
     return true; // Inspection continues streaming even when playback staging is full.
 }
 bool inspectFile(const char* path) {
-    if(!labStop()) { showNotice("Radio stop timed out"); return false; }
+    fileErrorRu[0]=0;
+    if(!labStop()) { showNotice("Radio stop timed out");snprintf(fileErrorRu,sizeof(fileErrorRu),"Радио не остановилось."); return false; }
     File file = SD.open(path, FILE_READ);
-    if(!file) { showNotice("SD open failed"); return false; }
+    if(!file) { showNotice("SD open failed");snprintf(fileErrorRu,sizeof(fileErrorRu),"Не удалось открыть\nфайл на SD."); return false; }
     WaveSink sink = {};
     SubParser parser(stagePulse, &sink);
     uint8_t block[256]; bool valid = true;
@@ -178,6 +182,7 @@ bool inspectFile(const char* path) {
     file.close(); valid = valid && parser.finish();
     if(!valid) {
         char error[80]; snprintf(error, sizeof(error), "line %lu: %s", (unsigned long)parser.line(), parser.errorText());
+        snprintf(fileErrorRu,sizeof(fileErrorRu),"Строка %lu:\n%s",(unsigned long)parser.line(),parser.errorTextRu());
         showNotice(error); waveformCount = 0; return false;
     }
     openedInfo = parser.info(); waveformCount = sink.full ? 0 : sink.used;
@@ -345,12 +350,16 @@ void listFiles() {
     folder.close();
 }
 void metadataScreen() {
-    char text[200];
-    snprintf(text,sizeof(text),"%lu Hz\n%.25s\n%.25s\n%lu pulses %lu ms\n%llu bytes RAW",
-        (unsigned long)openedInfo.frequencyHz,openedInfo.preset,openedInfo.protocol,
+    char text[320];
+    if(openedInfo.kind==SubKind::Raw)snprintf(text,sizeof(text),"%lu.%03lu МГц\n%.63s\nRAW\nИмпульсов: %lu\nДлина: %lu мс\n%llu байт RAW",
+        (unsigned long)(openedInfo.frequencyHz/1000000),(unsigned long)((openedInfo.frequencyHz/1000)%1000),openedInfo.preset,
         (unsigned long)openedInfo.raw.pulses,(unsigned long)(openedInfo.raw.durationUs/1000),
         (unsigned long long)openedInfo.raw.bufferedBytes());
-    message("Signal metadata",text);
+    else snprintf(text,sizeof(text),"%lu.%03lu МГц\n%.63s\n%.63s\nБит: %u\nTE: %lu мкс\nGuard: %u\n%s",
+        (unsigned long)(openedInfo.frequencyHz/1000000),(unsigned long)((openedInfo.frequencyHz/1000)%1000),openedInfo.preset,openedInfo.protocol,
+        openedInfo.bits,(unsigned long)openedInfo.teUs,openedInfo.guardTime,
+        dynamicSubProtocol(openedInfo.protocol)?"Динамический код:\nнет кодировщика.":"");
+    message("О файле",text);
 }
 bool duplicateFile(const char* from,const char* to) {
     if(!safePath(to)||SD.exists(to)) return false;
@@ -408,7 +417,75 @@ void fileActions(const char* path,bool presetMode) {
     }
     resetInput();
 }
-void browser(bool music=false,bool presets=false) {
+const char* prepareOpenedFileSend(StaticSubWaveform& generated) {
+    if(openedInfo.kind==SubKind::Key) {
+        waveformCount=0;
+        const StaticSubError result=encodeStaticSub(openedInfo,waveform,kWaveformCapacity,generated);
+        if(result!=StaticSubError::None)return staticSubErrorRu(result);
+        waveformCount=generated.count;
+    } else if(openedInfo.kind==SubKind::Raw) {
+        if(openedInfo.raw.pulses>kWaveformCapacity)return "Запись длиннее 2048\nимпульсов. Только\nпросмотр файла.";
+        if(openedInfo.raw.durationUs>5000000)return "Запись длиннее 5 сек.\nТолько просмотр файла.";
+        if(!openedInfo.rawCompatible||!waveformCount)return "Этот RAW нельзя\nпередать как OOK.";
+        if(waveform[0]<=0)return "RAW начинается с LOW.\nПередача не поддержана.";
+        generated.count=waveformCount;generated.durationUs=uint32_t(openedInfo.raw.durationUs);generated.repeats=1;generated.phaseRotated=false;
+    } else return "Тип файла не подходит\nдля передачи.";
+    RadioSettings description;
+    if(!describeRadio(openedInfo.radio,openedInfo.frequencyHz,description) ||
+       description.modulation!=Modulation::AskOok || description.packetFormat!=PacketFormat::Async ||
+       description.crc || description.whitening || description.manchester || description.fec || description.syncMode)
+        return "Передача поддержана\nтолько для OOK RAW,\nPrinceton24 и CAME.";
+    if(openedInfo.radio.pa[0])return "Многоуровневый ASK:\nпередача не поддержана.";
+    for(size_t i=2;i<8;++i)if(openedInfo.radio.pa[i])return "Многоуровневый ASK:\nпередача не поддержана.";
+    if(openedInfo.radio.present[0x22]&&(openedInfo.radio.value[0x22]&7)!=1)return "Не подходит PA-профиль\nфайла для OOK.";
+    if(!permitLabTx(TxProfile::ShieldedLab,openedInfo.frequencyHz,(generated.durationUs+999)/1000,5000))
+        return "Передача только на\n433.920 / 868.350 МГц.\nЧастота файла сохранена.";
+    return nullptr;
+}
+void sendOpenedFile(const char* path) {
+    StaticSubWaveform generated={0,0,0,false};const char* error=prepareOpenedFileSend(generated);
+    if(error){message("Отправка",error);return;}
+    const RadioSettings savedSettings=settings;const RegisterImage savedRadio=radio;
+    const TxProfile savedProfile=profile;const uint8_t savedPower=powerIndex;
+    RadioSettings fileSettings;
+    if(!describeRadio(openedInfo.radio,openedInfo.frequencyHz,fileSettings)){message("Отправка","Ошибка параметров\nрадио в файле.");return;}
+    settings=fileSettings;settings.txLimitMs=5000;radio=openedInfo.radio;profile=TxProfile::ShieldedLab;powerIndex=1;
+    resetInput();
+    while(true) {
+        input();if(back||holdBack)break;
+        if(holdOk) {
+            uint32_t elapsed=0;int32_t timingError=0;
+            const bool sent=labTransmitRaw(waveform,waveformCount,openedInfo.radio,openedInfo.frequencyHz,profile,powerIndex,5000,elapsed,timingError);
+            char result[200];snprintf(result,sizeof(result),"%s\n%lu мс\nПриём устройством\nне подтверждён.",sent?"Передача завершена.":"Не передано: ошибка\nили остановка BACK.",(unsigned long)(elapsed/1000));
+            message("Отправка",result);break;
+        }
+        if(frame()) {
+            title("Отправить .sub");const char* leaf=strrchr(path,'/');line(2,leaf?leaf+1:path);
+            char detail[64];snprintf(detail,sizeof(detail),"%lu.%03lu МГц 0дБм",(unsigned long)(openedInfo.frequencyHz/1000000),(unsigned long)((openedInfo.frequencyHz/1000)%1000));line(3,detail);
+            snprintf(detail,sizeof(detail),"%s %lu мс",openedInfo.kind==SubKind::Raw?"RAW 1 проход":"6 повторов",(unsigned long)(generated.durationUs/1000));line(4,detail);
+            footer("Держ.OK:слать BACK");display.display();
+        }
+    }
+    settings=savedSettings;radio=savedRadio;profile=savedProfile;powerIndex=savedPower;resetInput();
+}
+void friendlyFileActions(const char* path) {
+    static const char* actions[]={"Отправить","О файле","Ещё"};size_t selected=0;resetInput();
+    while(true) {
+        input();if(back||holdBack)break;if(up)selected=(selected+2)%3;if(down)selected=(selected+1)%3;
+        if(ok) {
+            if(selected==2){fileActions(path,false);break;}
+            if(!inspectFile(path)){message("Ошибка файла",fileErrorRu[0]?fileErrorRu:"Не удалось прочитать.");resetInput();continue;}
+            if(selected==0)sendOpenedFile(path);else metadataScreen();resetInput();
+        }
+        if(frame()) {
+            title("Файл .sub");const char* leaf=strrchr(path,'/');ui_text::draw(display,0,14,leaf?leaf+1:path);
+            for(size_t row=0;row<3;++row){display.setCursor(0,25+row*9);display.print(row==selected?"> ":"  ");ui_text::print(display,actions[row]);}
+            footer("UP/DN OK:вход BACK");display.display();
+        }
+    }
+    resetInput();
+}
+void browser(bool music=false,bool presets=false,bool friendly=false) {
     if(!labStop())return;
     snprintf(currentFolder,sizeof(currentFolder),"%s",presets?"/subghz/presets":"/subghz");filter[0]=0;
     listFiles();size_t selected=0;resetInput();
@@ -431,12 +508,12 @@ void browser(bool music=false,bool presets=false) {
                         while(!done){input();if(back||holdBack)break;if(holdOk){uint32_t elapsed;int32_t error;bool sent=labTransmitRaw(waveform,waveformCount,openedInfo.radio,openedInfo.frequencyHz,profile,powerIndex,settings.txLimitMs,elapsed,error);char b[150];snprintf(b,sizeof(b),"%s\nWall %lu us\nCompletion delta %ld us\nEdge jitter unmeasured",sent?"Waveform sent":"TX blocked/aborted",(unsigned long)elapsed,(long)error);message("Music timing",b);done=true;}if(frame()){title("Music Lab / RAW");line(2,"Hold OK: finite TX");line(3,profile==TxProfile::ShieldedLab?"Shielded lab enabled":"TX profile: receive only");line(4,"BACK stops transmission");footer("hold OK play BACK exit");display.display();}}
                     }
                 } else message("Music file error",notice);
-            } else {char path[112];snprintf(path,sizeof(path),"%s",paths[selected]);fileActions(path,presets);listFiles();if(selected>=pathCount)selected=0;}
+            } else {char path[112];snprintf(path,sizeof(path),"%s",paths[selected]);if(friendly)friendlyFileActions(path);else fileActions(path,presets);listFiles();if(selected>=pathCount)selected=0;}
         }
         if(frame()) {
-            title(music?"Sub-GHz Music Lab":presets?"Saved Presets":"Signal Manager");line(2,currentFolder);
-            for(size_t row=0;row<4;++row){size_t i=selected+row;if(i>=pathCount)break;const char* leaf=strrchr(paths[i],'/');display.setCursor(0,27+row*8);display.print(row?"  ":"> ");display.print(pathIsDir[i]?"/":"");display.print(leaf?leaf+1:paths[i]);}
-            if(!pathCount)line(4,"No matching files");display.display();
+            title(music?"Sub-GHz Music Lab":presets?"Saved Presets":friendly?"Файлы .sub":"Signal Manager");line(2,currentFolder);
+            for(size_t row=0;row<4;++row){size_t i=selected+row;if(i>=pathCount)break;const char* leaf=strrchr(paths[i],'/');display.setCursor(0,27+row*8);display.print(row?"  ":"> ");display.print(pathIsDir[i]?"/":"");ui_text::print(display,leaf?leaf+1:paths[i]);}
+            if(!pathCount)line(4,friendly?"Файлов пока нет":"No matching files");display.display();
         }
     }
     resetInput();
@@ -684,11 +761,11 @@ void simpleRadioSettings() {
 }
 
 void radioLabAdvanced() {
-    static const char* apps[]={"Приём протокола LAB","Запись RAW","Поиск частоты","Анализ спектра","Анализ RAW","Анализ протокола","Файлы сигналов","Генератор сигналов","Все настройки радио","Поиск модуляции","Чат с Flipper","Музыкальная лаб.","Диагностика CC1101","О программе"};
+    static const char* apps[]={"Приём протокола LAB","Запись RAW","Поиск частоты","Анализ спектра","Анализ RAW","Анализ протокола","Файлы сигналов","Генератор сигналов","Все настройки радио","Поиск модуляции","Чат с Flipper","Музыкальная лаб.","Диагностика CC1101","О программе","Прежнее меню"};
     const size_t count=sizeof(apps)/sizeof(apps[0]);size_t selected=0;resetInput();
     while(true) {
         input();if(back||holdBack)break;if(up)selected=(selected+count-1)%count;if(down)selected=(selected+1)%count;
-        if(ok){switch(selected){case 0:captureApp(true);break;case 1:captureApp(false);break;case 2:monitorApp(false);break;case 3:monitorApp(true);break;case 4:analyzerApp(false);break;case 5:analyzerApp(true);break;case 6:browser();break;case 7:generatorApp();break;case 8:settingsApp();break;case 9:explorerApp();break;case 10:chatApp();break;case 11:browser(true);break;case 12:diagnosticsApp();break;case 13:message("О радиолаборатории","ESP32 + CC1101\nRAW: один сигнал.\nCC1101 не SDR.\nПоддержка протоколов\nограничена.");break;}resetInput();}
+        if(ok){switch(selected){case 0:captureApp(true);break;case 1:captureApp(false);break;case 2:monitorApp(false);break;case 3:monitorApp(true);break;case 4:analyzerApp(false);break;case 5:analyzerApp(true);break;case 6:browser();break;case 7:generatorApp();break;case 8:settingsApp();break;case 9:explorerApp();break;case 10:chatApp();break;case 11:browser(true);break;case 12:diagnosticsApp();break;case 13:message("О радиолаборатории","ESP32 + CC1101\nRAW: один сигнал.\nCC1101 не SDR.\nПоддержка протоколов\nограничена.");break;case 14:while(!labStop()){showNotice("Waiting for radio worker to stop");delay(10);}runSubGHz();suspendLegacyReceive();break;}resetInput();}
         if(frame()){title("Дополнительно");for(size_t row=0;row<4;++row){const size_t i=(selected+row)%count;display.setCursor(0,17+row*9);display.print(row?"  ":"> ");ui_text::print(display,apps[i]);}footer("UP/DN выбор OK:вход");display.display();}
     }
     resetInput();
@@ -708,6 +785,8 @@ void runSubGhzChat() {
 
 void runRadioLab() {
     using namespace research;
+    if(radioLabHomeOpen){message("Радио","Для возврата нажмите\nBACK в прежнем меню.");return;}
+    radioLabHomeOpen=true;
     suspendLegacyReceive();
     settings=RadioSettings();settings.rxTimeoutMs=30000;selectPreset(0);profile=TxProfile::ReceiveOnly;powerIndex=0;chatFormat=ChatMode::FlipperPlaintext;
     SD.mkdir("/subghz");SD.mkdir("/subghz/presets");
@@ -715,12 +794,12 @@ void runRadioLab() {
     const size_t count=sizeof(apps)/sizeof(apps[0]);size_t selected=0;resetInput();
     while(true){
         input();if(back||holdBack)break;if(up)selected=(selected+count-1)%count;if(down)selected=(selected+1)%count;
-        if(ok){switch(selected){case 0:if(settings.packetFormat!=PacketFormat::Async)selectPreset(0);captureApp(false);break;case 1:browser();break;case 2:chatApp();break;case 3:simpleRadioSettings();break;case 4:radioLabAdvanced();break;}resetInput();}
+        if(ok){switch(selected){case 0:if(settings.packetFormat!=PacketFormat::Async)selectPreset(0);captureApp(false);break;case 1:browser(false,false,true);break;case 2:chatApp();break;case 3:simpleRadioSettings();break;case 4:radioLabAdvanced();break;}resetInput();}
         if(frame()){char heading[40];snprintf(heading,sizeof(heading),"Радио %lu.%03lu",(unsigned long)(settings.frequencyHz/1000000),(unsigned long)((settings.frequencyHz/1000)%1000));title(heading);for(size_t row=0;row<4;++row){size_t i=(selected+row)%count;display.setCursor(0,17+row*9);display.print(row?"  ":"> ");ui_text::print(display,apps[i]);}footer("UP/DN выбор OK:вход");display.display();}
     }
     // Ownership cannot pass back to legacy code until the worker has stopped.
     while(!labStop()) { showNotice("Waiting for radio worker to stop"); delay(10); }
-    restoreReceiveMode();resetInput();
+    radioLabHomeOpen=false;restoreReceiveMode();resetInput();
 }
 
 bool radioLabPermitTx(uint32_t hz,uint32_t durationMs) {
@@ -730,25 +809,9 @@ bool radioLabPermitTx(uint32_t hz,uint32_t durationMs) {
 void runRadioLabFile(const char* path) {
     using namespace research;
     suspendLegacyReceive();
-    if(!inspectFile(path)) { message("File validation",notice); return; }
-    metadataScreen();
-    RadioSettings fileSettings;
-    if(!waveformCount || openedInfo.kind!=SubKind::Raw ||
-       !settingsFromSub(openedInfo,fileSettings) || fileSettings.modulation!=Modulation::AskOok) {
-        message("RAW transmission","Requires binary OOK RAW, <=2048 pulses. Unsupported files are not substituted.");return;
-    }
-    resetInput();
-    while(true) {
-        input();if(back||holdBack)break;
-        if(holdOk) {
-            uint32_t elapsed;int32_t error;
-            bool sent=labTransmitRaw(waveform,waveformCount,openedInfo.radio,openedInfo.frequencyHz,profile,powerIndex,settings.txLimitMs,elapsed,error);
-            char result[128];snprintf(result,sizeof(result),"%s\nWall duration %lu us\nCompletion delta %ld us",sent?"Finite waveform sent":"TX blocked/aborted/error",(unsigned long)elapsed,(long)error);
-            message("RAW transmission",result);break;
-        }
-        if(frame()){title("RAW / Music Lab");line(2,profile==TxProfile::ShieldedLab?"Shielded lab enabled":"RX only: enable in Lab");line(3,"Hold OK finite playback");line(4,"BACK manual stop");footer("hold OK send BACK exit");display.display();}
-    }
-    resetInput();
+    friendlyFileActions(path);
+    while(!labStop()){showNotice("Waiting for radio worker to stop");delay(10);}
+    restoreReceiveMode();resetInput();
 }
 
 extern bool setupCC1101();
