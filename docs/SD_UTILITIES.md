@@ -3,7 +3,7 @@
 These four Lua tools use the existing 128x64 screen and four buttons. Copy their
 source files from `examples/lua_apps/` to `/apps/` on the SD card, or use the
 existing USB app installer while the device is on its main menu. Open them from
-SD Apps. **Hold BACK to exit any tool**; a short BACK has the function below.
+**Приложения SD → Инструменты**. **Hold BACK to exit any tool**; a short BACK has the function below.
 All values are session-only. These apps make no radio or other hardware calls.
 
 | App | UP / DOWN | OK | Short BACK |
@@ -13,15 +13,18 @@ All values are session-only. These apps make no radio or other hardware calls.
 | `unit_converter.lua` | Change the input value | Next conversion direction | Cycle the input increment |
 | `resistor_codes.lua` | Change the selected band's color | Next band | Toggle four/five bands; select the first band |
 
-Each tool displays its controls in the bottom row. Color names and all other
-labels are ASCII text suitable for the monochrome display.
+Each tool displays its controls in the bottom row. The shipped tools use Russian
+titles, color names and help text; button abbreviations match the physical keys
+(DN means DOWN, BK means BACK). The display supports printable ASCII and Russian
+А–Я/а–я/Ё/ё. See the [Russian quick guide](QUICK_START_RU.md) for the menu names
+and all eleven apps.
 
 ## Countdown
 
 The initial duration is five minutes. Edit minutes first, press OK to edit
 seconds, then press OK to start. The range is 00:01 through 99:59. A zero
 duration prompts for a nonzero time. While running, OK pauses/resumes; BACK
-returns to editing the original configured duration. On completion, **TIME UP!**
+returns to editing the original configured duration. On completion, **ВРЕМЯ ВЫШЛО!**
 is a visual alert, and OK restarts the same duration. There is no sound or
 background alarm after leaving the app.
 

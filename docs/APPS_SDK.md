@@ -221,14 +221,16 @@ host (Zig example):
 python tests/lua_sandbox/run.py --compiler <zig.exe>
 ```
 
-The checked Windows Zig and Ubuntu GCC runs each passed 91,714 checks,
+The checked Windows Zig and Ubuntu GCC runs each passed 91,990 checks,
 including 16,500 sample frames across all eleven apps,
 allocation/coalescing/canary checks, 25 VM reopen/close cycles, quota interruption,
 safe OOM handling, blocked APIs/bytecode, safe nonstring callback errors, and
 bounded table operations including giant sparse lengths and overlapping moves.
 Fake-clock boundary tests distinguish the 10 ms draw budget from 5 ms
 tick/input/top-level execution, including time spent in native work, Lua hook
-checks and microsecond clock wrap. A frozen-clock runaway draw still reaches
+checks and microsecond clock wrap. UTF-8 tests cover the complete Russian
+alphabet, malformed/truncated/overlong encodings, unsupported Unicode, embedded
+controls, glyph widths and the independent 160-byte text limit. A frozen-clock runaway draw still reaches
 the 100,000-instruction limit and fails.
 Game fixtures exercise merges, scoring, line clears, protected mine placement,
 flags, wins/losses and restart. Utility fixtures exercise decimal/range edges,

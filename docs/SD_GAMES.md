@@ -1,6 +1,6 @@
 # Games on the microSD card
 
-The **SD Apps → Games** section runs Lua games from `/apps/`. A firmware with the
+The **Приложения SD → Игры** section runs Lua games from `/apps/`. A firmware with the
 SD Apps runtime is required once; installing or editing another game afterwards
 does not require reflashing the ESP32. Games use the display and buttons only.
 
@@ -14,6 +14,9 @@ does not require reflashing the ESP32. Games use the display and buttons only.
 **Hold BACK exits every game through the native host**, including games that use
 short BACK as a playing control. Each game opens with its controls on screen.
 Scores and boards last for the current session; games do not save progress.
+The shipped titles and help text are Russian: **Змейка**, **2048**,
+**Падающие блоки** and **Сапёр**. DN means DOWN, BK means BACK on their compact
+help screens. The [Russian quick guide](QUICK_START_RU.md) lists all controls.
 
 ## Install the new games
 
