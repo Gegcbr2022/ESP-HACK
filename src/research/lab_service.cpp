@@ -143,7 +143,25 @@ bool configure(const RegisterImage& image, uint32_t hz) {
         if(image.present[i] && i != 0x0D && i != 0x0E && i != 0x0F && reg != image.value[i]) ok = false;
     }
     if(!ok) { errorCount(&LabSnapshot::spiErrors); status("Register readback mismatch"); return false; }
-    return receive(hz);
+    if(!receive(hz)) return false;
+    // SCAL and RX entry update calibration results. Cache these only after the
+    // first successful RX entry so diagnostics do not show pre-calibration data.
+    static const uint8_t calibratedAddresses[] = {0x23, 0x24, 0x25, 0x26, 0x2C, 0x2D, 0x2E};
+    uint8_t calibratedValues[sizeof(calibratedAddresses)];
+    for(size_t i = 0; i < sizeof(calibratedAddresses); ++i) {
+        calibratedValues[i] = ELECHOUSE_cc1101.SpiReadReg(calibratedAddresses[i]);
+        if(!ELECHOUSE_cc1101.spiReady()) {
+            errorCount(&LabSnapshot::spiErrors);
+            status("Calibration diagnostic SPI read failed");
+            return false;
+        }
+    }
+    portENTER_CRITICAL(&lock);
+    for(size_t i = 0; i < sizeof(calibratedAddresses); ++i)
+        state.registers[calibratedAddresses[i]] = calibratedValues[i];
+    state.misoTimeouts = ELECHOUSE_cc1101.spiTimeouts();
+    portEXIT_CRITICAL(&lock);
+    return true;
 }
 void sampleRadio() {
     uint8_t bytes = stableStatus(0x3B);
