@@ -1,0 +1,7 @@
+# Synthetic 1 kHz square wave; offline inspection fixture, no TX authorization.
+Filetype: Flipper SubGhz RAW File
+Version: 1
+Frequency: 433920000
+Preset: FuriHalSubGhzPresetOok650Async
+Protocol: RAW
+RAW_Data: 500 -500 500 -500 500 -500 500 -500
