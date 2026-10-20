@@ -237,6 +237,12 @@ void stopOwnedRadio(Runtime& runtime) {
     research::labRequestStop();
     while(!research::labStop()) { Serial.println("[Lua] Waiting for RX worker stop"); delay(10); }
 }
+template<class Callback> bool timedSampleCall(Callback call, uint32_t& peakUs, uint32_t& lastUs) {
+    const uint32_t started=micros();
+    const bool good=call();lastUs=micros()-started;
+    if(lastUs>peakUs)peakUs=lastUs;
+    return good;
+}
 void sampleSelfTest(const char* name, void* bank) {
     char path[48]; snprintf(path, sizeof(path), "/apps/%s", name);
     File file = SD.open(path, FILE_READ);
@@ -252,21 +258,21 @@ void sampleSelfTest(const char* name, void* bank) {
     LuaSandbox vm(bank, LuaSandbox::kHeapBytes, clockUs);
     bool good = read == length && vm.open(installBindings) && vm.load(source, length, path);
     free(source);
-    unsigned frames=0;
+    unsigned frames=0;uint32_t peakUs=0,lastUs=0;const char* phase="load";
     for(unsigned frame=0;frame<120&&good&&!runtime.quit;++frame) {
         if(frame%20==0) {
             const char* button=frame%60==0?"ok":frame%60==20?"down":"up";
-            runtime.drawCalls=0;good=vm.input(button,"press");
-            if(good){runtime.drawCalls=0;good=vm.input(button,"release");}
+            runtime.drawCalls=0;phase="press";good=timedSampleCall([&](){return vm.input(button,"press");},peakUs,lastUs);
+            if(good){runtime.drawCalls=0;phase="release";good=timedSampleCall([&](){return vm.input(button,"release");},peakUs,lastUs);}
         }
-        if(good){runtime.drawCalls=0;good=vm.tick(33);}
-        if(good){runtime.drawCalls=0;good=vm.draw();}
+        if(good){runtime.drawCalls=0;phase="tick";good=timedSampleCall([&](){return vm.tick(33);},peakUs,lastUs);}
+        if(good){runtime.drawCalls=0;phase="draw";good=timedSampleCall([&](){return vm.draw();},peakUs,lastUs);}
         if(good)++frames;
         delay(1);
     }
     if(good) display.display();
-    Serial.printf("[Lua] SAMPLE name=%s result=%s peak=%u/%u frames=%u%s%s\n", name, good ? "PASS" : "FAIL",
-                  unsigned(vm.peak()), unsigned(LuaSandbox::kHeapBytes), frames, good ? "" : " reason=",
+    Serial.printf("[Lua] SAMPLE name=%s result=%s peak=%u/%u frames=%u maxCallUs=%lu lastCallUs=%lu phase=%s%s%s\n", name, good ? "PASS" : "FAIL",
+                  unsigned(vm.peak()), unsigned(LuaSandbox::kHeapBytes), frames, static_cast<unsigned long>(peakUs),static_cast<unsigned long>(lastUs),phase,good ? "" : " reason=",
                   good ? "" : (read != length ? "incomplete-read" : vm.error()));
     vm.close(); activeApp = nullptr; stopOwnedRadio(runtime);
 }
