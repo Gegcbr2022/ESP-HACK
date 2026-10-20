@@ -23,7 +23,9 @@ logs are retained locally and are excluded from the public fork and release.
 The final Lua SDK image was written and all four segments passed explicit
 esptool verification. The final image includes Flipper plaintext mode and
 five-app diagnostics. Its application image is 1,658,160 bytes, SHA256
-`ffc1cb663ffcad8c65bcbbaa6f1b5e578a6c780ce356ad846bc56b52e7106be1`.
+`286d1bd5f7f810df885393c1af66f38202a0f311cf8f051f3630394937e8d1f1`.
+This last image defaults the chat UI to Flipper plaintext for the reported
+Unleashed app. The original ESP ACK format remains selectable.
 After reset, the receive-only probe passed again with CC1101 VERSION=14,
 MARCSTATE=0D and zero ready timeouts. SD mounted and UI initialization reported
 121,544 free heap bytes. The user confirmed that the OLED menu and buttons work
@@ -37,7 +39,7 @@ size/SHA256 confirmation after the SD file was closed and read back.
 Actual `appsdiag` output then reported:
 
 ```text
-[Lua] SELFTEST PASS version=Lua 5.4.9 peak=14144/49152 instructionQuota=100000 wallUs=5000
+[Lua] SELFTEST PASS version=Lua 5.4.9 peak=14344/49152 instructionQuota=100000 wallUs=5000
 [Lua] SAMPLE name=hello.lua result=PASS peak=16784/49152
 [Lua] SAMPLE name=stopwatch.lua result=PASS peak=17936/49152
 [Lua] SAMPLE name=rf_dashboard.lua result=PASS peak=20832/49152

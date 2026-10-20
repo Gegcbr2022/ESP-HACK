@@ -11,7 +11,7 @@ mock does not establish RF sensitivity, pulse accuracy or physical interoperabil
 | Upstream `8c57584c6a39fc3ac948ce2277337a5dd2915baf`, original unpinned environment | Failed | PlatformIO selected espressif32 8.0.0 / Arduino 3.3.12; the bundled OneWireHub `MEM_SIZE` identifier conflicts with an SDK macro |
 | Same original firmware sources, compatible external build configuration | PASS | SH1106 linked using espressif32 6.12.0, Arduino 2.0.17, Xtensa GCC 8.4.0; 88,072 static RAM bytes and 1,475,809 flash bytes reported; source baseline only |
 | Integrated RF lab build before the Lua SDK | PASS | SH1106 target linked and full image merged; one checked intermediate reported 115,872 static RAM bytes and 1,531,693 flash bytes; these are not the final Lua firmware's sizes |
-| Final ESP32 image including Flipper plaintext chat and five-app diagnostics | PASS | SH1106 linked and full image merged: 117,768 static RAM bytes, 1,651,585 flash bytes (84.0%); application binary 1,658,160 bytes, SHA256 `ffc1cb663ffcad8c65bcbbaa6f1b5e578a6c780ce356ad846bc56b52e7106be1` |
+| Final ESP32 image including Flipper plaintext chat and five-app diagnostics | PASS | SH1106 linked and full image merged: 117,768 static RAM bytes, 1,651,585 flash bytes (84.0%); application binary 1,658,160 bytes, SHA256 `286d1bd5f7f810df885393c1af66f38202a0f311cf8f051f3630394937e8d1f1` |
 | Flipper chat FAP | PASS | uFBT 0.2.6, official firmware/SDK 1.5.1, target 7 / API 88.2; actual `.fap` produced and strict import check passed |
 
 The official Flipper source reference is
@@ -80,8 +80,13 @@ The configured action release tags were checked against the official
 [checkout release](https://github.com/actions/checkout/releases/tag/v7.0.1),
 [setup-python release](https://github.com/actions/setup-python/releases/tag/v7.0.0)
 and [upload-artifact release](https://github.com/actions/upload-artifact/releases/tag/v7.0.2).
-Configuration review and local runs do not constitute a successful GitHub Actions
-run. Remote CI status remains pending until a published revision actually runs.
+The [final GitHub Actions run](https://github.com/Gegcbr2022/ESP-HACK/actions/runs/39468658074)
+passed all three jobs at runtime-source commit
+`8d47538fce27a59d8b395c3f2618e354f5c05817`, including the Unleashed-compatible
+UI default, five-app Lua suite and plaintext compatibility tests. ESP32 and FAP
+artifacts uploaded successfully. Later Markdown-only report changes do not
+change the compiled sources. The supplied Windows-built, device-verified image
+is identified by its own manifest/SHA256; CI also builds independently on Linux.
 
 ## Connected-device and RF status
 
@@ -96,12 +101,12 @@ passed explicit esptool verification. The boot probe reported PART=00 /
 VERSION=14, MARCSTATE=0D, zero SPI errors/ready timeouts, SD mounted and SH1106 UI
 ready with 121,544 free heap bytes. The user confirmed that the OLED menu and
 buttons work during the preceding SDK build. The final application SHA256 is
-`ffc1cb663ffcad8c65bcbbaa6f1b5e578a6c780ce356ad846bc56b52e7106be1`.
+`286d1bd5f7f810df885393c1af66f38202a0f311cf8f051f3630394937e8d1f1`.
 
 All five example apps were physically installed over USB with matching
 closed-file SD readback SHA256 confirmations. On-device `appsdiag` passed the
 real Lua VM, runaway instruction quota and each source's load/tick/draw check.
-ESP32 peaks were 14,144 bytes for the self-test, 16,784 for hello, 17,936 for
+ESP32 peaks were 14,344 bytes for the self-test, 16,784 for hello, 17,936 for
 stopwatch, 20,832 for the RF dashboard, 23,464 for Snake and 25,024 for 2048,
 within the 49,152-byte VM bank. Final diagnostics restored the main menu.
 Radio start is disabled during that diagnostic. A UART interruption recovered
