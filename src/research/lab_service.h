@@ -7,7 +7,7 @@
 namespace research {
 enum class ChatMode : uint8_t { EspAck, FlipperPlaintext };
 struct LabSnapshot {
-    bool active, connected, carrier, captureFull, captureTriggered, captureComplete;
+    bool active, connected, carrier, captureFull, captureTriggered, captureComplete, txEnabled, chatDiagnostic;
     LabMode mode;
     uint8_t part, version, marcState, rxBytes, pktStatus;
     uint32_t frequencyHz, samples, packets, crcErrors, fifoErrors, spiErrors, timeouts, misoTimeouts;
@@ -23,14 +23,16 @@ struct LabSnapshot {
     uint16_t peers[8];
     uint32_t receivedMessages, sentMessages, chatRetries;
     uint32_t plaintextRejected, plaintextTruncated;
+    uint32_t syncEvents, rxRearms;
+    uint8_t lastPacketLength, lastLqi;
     ChatMode chatMode;
     uint8_t delivery;
-    char message[161], status[64];
+    char message[161], status[64], txBlockReason[32];
 };
 // One radio worker owns every SPI transaction while active. No OLED or SD in it.
 bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& settings,
               TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz = 25000,
-              ChatMode chatMode = ChatMode::EspAck);
+              ChatMode chatMode = ChatMode::EspAck, bool chatDiagnostics = false);
 bool labStop();
 void labRequestStop();
 LabSnapshot labSnapshot();

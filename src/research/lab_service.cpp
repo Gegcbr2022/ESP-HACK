@@ -100,7 +100,9 @@ bool receive(uint32_t hz, bool calibrate = true) {
     ELECHOUSE_cc1101.SpiStrobe(0x3A); // SFRX is valid only in IDLE/overflow.
     pinMode(CC1101_GDO0, INPUT);
     ELECHOUSE_cc1101.SpiStrobe(0x34);
-    const bool ready = waitState(13);rxArmedAt=millis();syncSeen=false;return ready;
+    const bool ready = waitState(13);rxArmedAt=millis();syncSeen=false;
+    if(ready)errorCount(&LabSnapshot::rxRearms);
+    return ready;
 }
 void powerTable(uint32_t hz, uint8_t index, bool ook) {
     uint8_t pa[8] = {};
@@ -233,7 +235,7 @@ bool readPacket(uint8_t* frame, size_t& length) {
     const uint8_t bytes = m==1||m==17?stableStatus(0x3B):0;
     uint32_t age=millis()-rxArmedAt;
     if(m==13&&digitalRead(CC1101_GDO0)) {
-        if(!syncSeen){syncStarted=millis();syncSeen=true;}
+        if(!syncSeen){syncStarted=millis();syncSeen=true;errorCount(&LabSnapshot::syncEvents);}
         age=millis()-syncStarted>=200?1000:0;
     } else syncSeen=false;
     const FifoAction action=fifoAction(m,bytes,age);
@@ -250,6 +252,9 @@ bool readPacket(uint8_t* frame, size_t& length) {
     ELECHOUSE_cc1101.SpiReadBurstReg(0x3F, frame, length);
     uint8_t trailer[2]; ELECHOUSE_cc1101.SpiReadBurstReg(0x3F, trailer, 2);
     bool valid = trailer[1] & 0x80;
+    portENTER_CRITICAL(&lock);
+    state.lastPacketLength = length; state.lastLqi = trailer[1] & 0x7F;
+    portEXIT_CRITICAL(&lock);
     if(!valid) errorCount(&LabSnapshot::crcErrors);
     else errorCount(&LabSnapshot::packets);
     receive(activeSettings.frequencyHz, false);
@@ -268,8 +273,10 @@ void publishMessage(uint16_t source, const char* text) {
 void worker(void*) {
     LabMode mode = state.mode;
     const bool plaintext = state.chatMode == ChatMode::FlipperPlaintext;
+    const bool diagnostic = state.chatDiagnostic;
     if(mode == LabMode::Explorer) loadPreset("AM270",activeImage);
     bool configured = configure(activeImage, activeSettings.frequencyHz);
+    if(configured && mode == LabMode::Chat) status(diagnostic ? "Diagnostic RX-only30s; manual CRC" : "Chat RX ready");
     if(configured && (mode == LabMode::Raw || mode == LabMode::Explorer))
         configured = raw_capture::start(CC1101_GDO0);
     uint32_t rawEdgeTime = raw_capture::snapshot().lastEdgeUs;
@@ -348,7 +355,7 @@ void worker(void*) {
             if(xQueueReceive(commands, &command, 0) == pdTRUE) {
                 if(plaintext) {
                     const char* text = command.discover ? "online" : command.text;
-                    if(activeProfile != TxProfile::ShieldedLab ||
+                    if(diagnostic || activeProfile != TxProfile::ShieldedLab ||
                        !flipper_chat_tx_queue(&plaintextTx, text, strlen(text), now)) status("Chat busy or TX off");
                     else previousDelivery = ChatQueued; // A one-packet line can finish in this iteration.
                 }
@@ -378,8 +385,10 @@ void worker(void*) {
             // chunk before starting. Our own budget cannot split a line for60s.
             const uint32_t allowance = plaintext && plaintextTx.offset == 0 && plaintextTx.length ?
                 ((plaintextTx.length + FLIPPER_CHAT_PACKET - 1) / FLIPPER_CHAT_PACKET) * 100 : 100;
-            const bool busy = (ELECHOUSE_cc1101.SpiReadStatus(0x38) & 0x40) ||
-                              int32_t(now - nextTx) < 0 || airtimeMs + allowance > 1000;
+            const bool carrierBusy = ELECHOUSE_cc1101.SpiReadStatus(0x38) & 0x40;
+            const bool packetGap = int32_t(now - nextTx) < 0;
+            const bool budgetBusy = airtimeMs + allowance > 1000;
+            const bool busy = diagnostic || carrierBusy || packetGap || budgetBusy;
             length = plaintext ? flipper_chat_tx_poll(&plaintextTx, now, busy, frame, sizeof(frame)) :
                                  chat_session_poll(&chat, now, busy, frame, sizeof(frame));
             if(length) {
@@ -398,13 +407,15 @@ void worker(void*) {
             state.receivedMessages = receivedMessages; state.sentMessages = sentMessages;
             state.delivery = delivery; state.chatRetries = plaintext ? 0 : chat.attempts;
             state.plaintextRejected = plaintextRx.rejected; state.plaintextTruncated = plaintextRx.truncations;
+            snprintf(state.txBlockReason, sizeof(state.txBlockReason), "%s", !state.txEnabled ? "TX off: Radio Settings" :
+                     carrierBusy ? "Carrier busy" : packetGap ? "100ms packet gap" : budgetBusy ? "60s airtime budget" : "Ready: manual send");
             if(!plaintext) {
                 for(size_t i = 0; i < 8; ++i) state.peers[i] = chat.peers[i].id;
                 if(chat.peers[0].id) state.peer = chat.peers[0].id;
             }
             portEXIT_CRITICAL(&lock);
         }
-        if(activeSettings.rxTimeoutMs && mode != LabMode::Chat && now - rxStart >= activeSettings.rxTimeoutMs) {
+        if(activeSettings.rxTimeoutMs && (mode != LabMode::Chat || diagnostic) && now - rxStart >= activeSettings.rxTimeoutMs) {
             status("Receive timeout"); break;
         }
         vTaskDelay(1);
@@ -424,7 +435,7 @@ void worker(void*) {
 }
 
 bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& settings,
-              TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz, ChatMode chatMode) {
+              TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz, ChatMode chatMode, bool chatDiagnostics) {
     if(!labStop()) return false;
     if(mode==LabMode::Raw&&!capture) {
         capture=static_cast<int32_t*>(heap_caps_malloc(kWaveformCapacity*sizeof(int32_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
@@ -444,6 +455,10 @@ bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& set
     case LabMode::Chat:event=LabEvent::StartChat;break;default:break;}
     state.mode = transition(LabMode::Idle,event); state.active = true; state.rssiDbm = state.peakDbm = -127;
     state.chatMode = chatMode;
+    state.chatDiagnostic = chatDiagnostics && mode == LabMode::Chat;
+    state.frequencyHz = settings.frequencyHz;
+    state.txEnabled = !state.chatDiagnostic && permitLabTx(profile, settings.frequencyHz, 100, settings.txLimitMs);
+    snprintf(state.txBlockReason, sizeof(state.txBlockReason), "%s", state.txEnabled ? "Ready: manual send" : "TX off: Radio Settings");
     for(size_t i = 0; i < kSweepBins; ++i) state.sweep[i] = state.peakHold[i] = -127;
     snprintf(state.status, sizeof(state.status), "Starting radio");
     stopRequested = false; xEventGroupClearBits(events, kDone);
@@ -452,11 +467,14 @@ bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& set
         const uint8_t* registers = chatMode == ChatMode::FlipperPlaintext ? flipper_chat_registers : chat_radio_registers;
         const size_t registerBytes = chatMode == ChatMode::FlipperPlaintext ? FLIPPER_CHAT_REGISTER_BYTES : CHAT_RADIO_REGISTER_BYTES;
         for(size_t i = 0; i < registerBytes; i += 2) activeImage.set(registers[i], registers[i+1]);
+        // Diagnostic receive keeps CRC-bad packets for the bounded manual check.
+        // This changes local filtering only, with no transmission or wire change.
+        if(state.chatDiagnostic) activeImage.set(0x07, 0x04);
         state.self = uint16_t(ESP.getEfuseMac()) ?: 1;
         // Initialized with a random boot session so rebooted senders do not reuse IDs.
         chat_session_init(&chat, state.self, uint16_t(esp_random()) ?: 1, "ESP-HACK", esp_random());
         state.self = chat.id;
-        chat_session_enable_tx(&chat, profile == TxProfile::ShieldedLab);
+        chat_session_enable_tx(&chat, state.txEnabled);
         flipper_chat_rx_init(&plaintextRx); flipper_chat_tx_init(&plaintextTx);
     }
     if(xTaskCreatePinnedToCore(worker, "radio-lab", 6144, nullptr, 2, &workerHandle, 0) != pdPASS) {
@@ -479,13 +497,13 @@ LabSnapshot labSnapshot() {
 bool labQueueText(const char* text, uint16_t destination) {
     const LabSnapshot current = labSnapshot();
     if(!text || !*text || strlen(text) > 160 || !commands || !current.active || current.mode != LabMode::Chat ||
-       activeProfile != TxProfile::ShieldedLab) return false;
+       !current.txEnabled) return false;
     ChatCommand c = {}; c.destination = destination; snprintf(c.text, sizeof(c.text), "%s", text);
     return xQueueSend(commands, &c, 0) == pdTRUE;
 }
 bool labDiscover() {
     const LabSnapshot current = labSnapshot();
-    if(!current.active || current.mode != LabMode::Chat || activeProfile != TxProfile::ShieldedLab) return false;
+    if(!current.active || current.mode != LabMode::Chat || !current.txEnabled) return false;
     ChatCommand c = {}; c.discover = true;
     return commands && xQueueSend(commands, &c, 0) == pdTRUE;
 }

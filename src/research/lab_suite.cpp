@@ -32,8 +32,26 @@ char filter[32] = "";
 char notice[80] = "";
 uint32_t lastFrame;
 bool up, down, ok, back, holdOk, holdBack;
+bool serialChatContext, serialChatListen, serialChatReported;
+
+void printChatStatus() {
+    const LabSnapshot s=labSnapshot();
+    Serial.printf("[Chat] active=%u connected=%u mode=%s diagnostic=%u freq=%lu TX=%s reason=%s\n",
+        s.active,s.connected,s.chatMode==ChatMode::FlipperPlaintext?"plain":"ack",s.chatDiagnostic,
+        (unsigned long)s.frequencyHz,s.txEnabled?"enabled":"OFF",s.txBlockReason);
+    Serial.printf("[Chat] marc=%02X fifo=%02X pkt=%02X rssi=%d sync=%lu rearm=%lu packets=%lu crc=%lu fifoerr=%lu spi=%lu miso=%lu RX=%lu TX=%lu reject=%lu trunc=%lu len=%u lqi=%u\n",
+        s.marcState,s.rxBytes,s.pktStatus,s.rssiDbm,(unsigned long)s.syncEvents,(unsigned long)s.rxRearms,
+        (unsigned long)s.packets,(unsigned long)s.crcErrors,(unsigned long)s.fifoErrors,(unsigned long)s.spiErrors,
+        (unsigned long)s.misoTimeouts,(unsigned long)s.receivedMessages,(unsigned long)s.sentMessages,
+        (unsigned long)s.plaintextRejected,(unsigned long)s.plaintextTruncated,s.lastPacketLength,s.lastLqi);
+    Serial.printf("[Chat] configured IOCFG0=%02X PKTLEN=%02X PKTCTRL1=%02X PKTCTRL0=%02X SYNC=%02X%02X MDMCFG=%02X/%02X/%02X MCSM1=%02X\n",
+        s.registers[2],s.registers[6],s.registers[7],s.registers[8],s.registers[4],s.registers[5],
+        s.registers[0x10],s.registers[0x11],s.registers[0x12],s.registers[0x17]);
+    if(s.message[0])Serial.printf("[Chat] last=%s\n",s.message);
+}
 
 void input() {
+    if(serialChatContext)radioLabSerialPoll();
     buttonUp.tick(); buttonDown.tick(); buttonOK.tick(); buttonBack.tick();
     up = buttonUp.isClick(); down = buttonDown.isClick();
     ok = buttonOK.isClick(); back = buttonBack.isClick();
@@ -499,7 +517,7 @@ void readHistory(){
 }
 void chatApp(){
     if(!laboratoryChannel(settings.frequencyHz)){message("Sub-GHz Chat","Select 433920000 or 868350000 Hz in Radio Settings. Both devices must match.");return;}
-    if(!startMode(LabMode::Chat))return;uint16_t recipient=0;size_t selected=0;static const char* items[]={"Inbox / sent history","Compose message","Discover devices","Select recipient","Delivery status","Mode: ESP ACK"};resetInput();
+    if(!startMode(LabMode::Chat))return;serialChatContext=true;uint16_t recipient=0;size_t selected=0;static const char* items[]={"Inbox / sent history","Compose message","Discover devices","Select recipient","Delivery status","Mode: ESP ACK"};resetInput();
     while(true){
         input();uint16_t source;char received[161];while(labReceiveMessage(source,received,sizeof(received)))addHistory(source,false,received);
         const bool plaintext=chatFormat==ChatMode::FlipperPlaintext;
@@ -513,9 +531,9 @@ void chatApp(){
             if(selected==5){if(!labStop()){showNotice("Radio still stopping");continue;}chatFormat=plaintext?ChatMode::EspAck:ChatMode::FlipperPlaintext;recipient=0;historySize=historyNext=0;if(!startMode(LabMode::Chat))break;showNotice(chatFormat==ChatMode::FlipperPlaintext?"Flipper plaintext; encryption off":"ESP ACK protocol");}
             resetInput();
         }
-        if(frame()){LabSnapshot s=labSnapshot();const bool plain=chatFormat==ChatMode::FlipperPlaintext;title(plain?"Flipper plaintext":"Sub-GHz Chat / ACK");char b[40];if(plain)snprintf(b,sizeof(b),"%lu Hz %ddBm",(unsigned long)s.frequencyHz,s.rssiDbm);else snprintf(b,sizeof(b),"Me%04X To%04X %ddBm",s.self,recipient?recipient:s.peer,s.rssiDbm);line(2,b);line(3,selected==5?(plain?"Mode: Flipper plain":"Mode: ESP ACK"):selected==2&&plain?"Send presence":selected==3&&plain?"Compatibility info":items[selected]);line(4,profile==TxProfile::ShieldedLab?"TX: shielded laboratory":"TX off: Radio Settings");footer("UP/DN item OK open BK");display.display();}
+        if(frame()){LabSnapshot s=labSnapshot();const bool plain=chatFormat==ChatMode::FlipperPlaintext;title(plain?"Flipper plaintext":"Sub-GHz Chat / ACK");char b[48];snprintf(b,sizeof(b),"%s %lu.%03lu %ddB",s.active&&s.connected?"RX":"OFF",(unsigned long)(s.frequencyHz/1000000),(unsigned long)((s.frequencyHz/1000)%1000),s.rssiDbm);display.setCursor(0,13);display.print(b);display.setCursor(0,23);display.print(selected==5?(plain?"Mode: Flipper plain":"Mode: ESP ACK"):selected==2&&plain?"Send presence":selected==3&&plain?"Compatibility info":items[selected]);snprintf(b,sizeof(b),"P%lu C%lu F%lu M%lu",(unsigned long)s.packets,(unsigned long)s.crcErrors,(unsigned long)s.fifoErrors,(unsigned long)s.receivedMessages);display.setCursor(0,33);display.print(b);display.setCursor(0,43);display.print(s.txBlockReason);footer("UP/DN item OK open BK");display.display();}
     }
-    labStop();resetInput();
+    labStop();serialChatContext=false;resetInput();
 }
 }
 
@@ -576,19 +594,65 @@ void radioLabBootDiagnostics() {
     Serial.println("[RadioLab] receive-only boot probe complete; RF waveform validation pending");
 }
 void radioLabSerialPoll() {
-    static char command[160];static uint8_t used;
-    while(Serial.available()) {
+    if(serialChatListen) {
+        const research::LabSnapshot s=research::labSnapshot();
+        if(s.chatDiagnostic&&s.active&&s.samples&&!serialChatReported){printChatStatus();serialChatReported=true;}
+        if(s.chatDiagnostic) {
+            uint16_t source;char text[161];
+            for(unsigned i=0;i<8&&research::labReceiveMessage(source,text,sizeof(text));++i)Serial.printf("[Chat] RX text=%s\n",text);
+        }
+        if(!s.active||!s.chatDiagnostic) {
+            if(s.chatDiagnostic&&!s.active) {
+                if(!research::labStop())return; // Keep ownership until the worker confirms completion.
+                restoreReceiveMode();
+            }
+            Serial.println("[Chat] DONE receive-only diagnostic");printChatStatus();serialChatListen=false;
+        }
+    }
+    static char command[160];static uint8_t used;static bool overflow;
+    for(unsigned drained=0;drained<256&&Serial.available();++drained) {
         const char c=Serial.read();
         if(c=='\r')continue;
         if(c=='\n') {
             command[used]=0;
-            if(handleAppInstallCommand(command)){}
+            const research::LabSnapshot s=research::labSnapshot();
+            if(overflow)Serial.println("[Chat] ERROR command too long");
+            else if(!strcmp(command,"chatstat"))printChatStatus();
+            else if(!strcmp(command,"screen")) {
+                const uint8_t* pixels=display.getBuffer();
+                if(!pixels)Serial.println("[Screen] ERROR no framebuffer");
+                else {
+                    static const char hex[]="0123456789ABCDEF";
+                    Serial.println("SCREEN12864");
+                    for(size_t offset=0;offset<1024;offset+=64) {
+                        char encoded[129];
+                        for(size_t i=0;i<64;++i){encoded[i*2]=hex[pixels[offset+i]>>4];encoded[i*2+1]=hex[pixels[offset+i]&15];}
+                        encoded[128]=0;Serial.println(encoded);
+                    }
+                    Serial.println("ENDSCREEN");
+                }
+            }
+            else if(!strcmp(command,"chatstop")) {research::labRequestStop();Serial.println("[Chat] stop requested");}
+            else if(!strcmp(command,"chatlisten plain433")||!strcmp(command,"chatlisten plain868")) {
+                if(serialChatContext||s.active)Serial.println("[Chat] ERROR busy; stop current radio first");
+                else {
+                    research::RegisterImage image;research::RadioSettings listen;
+                    research::loadPreset("AM270",image);listen.frequencyHz=!strcmp(command,"chatlisten plain433")?433920000:868350000;
+                    listen.rxTimeoutMs=30000;suspendLegacyReceive();
+                    serialChatListen=research::labStart(research::LabMode::Chat,image,listen,research::TxProfile::ReceiveOnly,0,25000,research::ChatMode::FlipperPlaintext,true);
+                    serialChatReported=false;
+                    Serial.printf("[Chat] %s plain receive-only freq=%lu limit=30000ms manualCRC=1\n",serialChatListen?"START":"FAIL",(unsigned long)listen.frequencyHz);
+                    if(!serialChatListen)restoreReceiveMode();
+                }
+            }
+            else if((serialChatContext||s.active)&&used)Serial.println("[Chat] busy: use chatstat, screen or chatstop");
+            else if(handleAppInstallCommand(command)){}
             else if(!strcmp(command,"rfdiag"))radioLabBootDiagnostics();
             else if(!strcmp(command,"appsdiag"))sdAppsSelfTest();
-            else if(used)Serial.println("[RadioLab] commands: rfdiag, appsdiag, APP_PUT");
-            used=0;
-        } else if(c>=32&&c<=126&&used+1<sizeof(command))command[used++]=c;
-        else used=0;
+            else if(used)Serial.println("[RadioLab] commands: chatstat, chatlisten plain433/plain868, chatstop, screen, rfdiag, appsdiag, APP_PUT");
+            used=0;overflow=false;
+        } else if(!overflow&&c>=32&&c<=126&&used+1<sizeof(command))command[used++]=c;
+        else overflow=true;
     }
 }
 void ensureRadioLabFixture() {
