@@ -28,7 +28,7 @@ historical evidence for that identified image.
 | Intermediate image `e23c31d` | Verified flashed; controlled one-way RX PASS | Valid-CRC Flipper-to-ESP32 packets at adjusted programmed RX frequency; final calibrated two-way exchange was not established by this test |
 | Source `28e4d46`: complete-path pagination, reference-clock probe, UART diagnostics and device calibration | PASS native / ESP32 / Flipper CI | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,605 flash bytes (86.3%); both target artifacts uploaded. Final device evidence is recorded separately |
 | Previously verified source `d63f1ca`: host carrier-gate correction | PASS native / ESP32 / Flipper CI and controlled device tests | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,629 flash bytes (86.3%); both target artifacts uploaded. Separately built device application 1,703,456 bytes, all four segments verified; normal-UI/Flipper-CLI plaintext exchange passed both directions, as detailed below |
-| Later source `087f9b6`: visible keyboard | Native keyboard/model/controller PASS; target/CI/device retest pending |8 × 4 ASCII keys, field-specific alphabets and cancel preserving original output; the earlier `d63f1ca` RF/app result does not identify this image |
+| Later source `087f9b6`: visible keyboard | PASS native / ESP32 / Flipper CI; device retest pending | Linux SH1106 build: 118,848 static RAM bytes, 1,699,365 flash bytes (86.4%); both target artifacts uploaded. 8 × 4 ASCII keys, field-specific alphabets and cancel preserving original output; the earlier `d63f1ca` RF/app result does not identify this image |
 | Companion Flipper chat FAP (previous checked source) | PASS | uFBT 0.2.6, official firmware/SDK 1.5.1, target 7 / API 88.2; actual `.fap` produced and strict import check passed |
 
 The official Flipper source reference is
@@ -161,6 +161,13 @@ also passed **native, ESP32 SH1106 and Flipper** at exact source
 `d63f1ca96d7af20b336cee8065ea862468adc343`. The native job includes the
 1,048,643-check profile/carrier-gate suite. Both target artifacts uploaded
 successfully. This is a build/software-test result, not a peer-reception test.
+
+The [visible-keyboard CI run](https://github.com/Gegcbr2022/ESP-HACK/actions/runs/39486105314)
+passed **native, ESP32 SH1106 and Flipper** at exact source
+`087f9b68fd8f2242e26fdab1054e8d0e72b3134c`. Native output confirms 1,460,550
+keyboard-model and 2,429 actual editor/controller checks. Both target artifacts
+uploaded successfully. This run does not replace the pending physical
+keyboard/no-TX preview, RF and eleven-app retest of the new image.
 The supplied firmware's manifest/SHA256 identifies its own Windows build;
 GitHub Actions builds independently on Linux.
 
