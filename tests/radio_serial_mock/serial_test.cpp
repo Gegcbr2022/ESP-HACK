@@ -15,6 +15,7 @@ bool inMenu=true,serialChatContext=false,serialChatListen=false,serialChatReport
 bool serialChatCloseRequested=false,serialChatOpenPending=false;
 bool serialChatEditPending=false,serialChatEditing=false;
 bool serialCaptureContext=false,serialCaptureOpenPending=false,serialCaptureSavePending=false,serialCaptureCloseRequested=false;
+bool serialCaptureTraceRequested=false;
 char captureSavedPath[112]="";
 ChatMode chatFormat=ChatMode::FlipperPlaintext;
 static LabSnapshot observed={};
@@ -23,6 +24,9 @@ static uint32_t startFrequency,startTimeout;static uint16_t sentDestination;
 static bool failStart;
 static unsigned editorCalls;static bool editorAccept=true;
 static unsigned captureCalls,captureStats;
+static RawTraceInfo traceInfo;static std::vector<RawTraceEntry> traceEvents;
+static unsigned joins,traceReleases,traceCopies,traceYields;
+static bool joinFailure,traceCopyFailure;
 bool up,down,ok,back,holdOk,holdBack,holdUp,holdDown;
 enum { EUp=1,EDown=2,EOk=4,EBack=8,EHoldOk=16,EHoldBack=32,EHoldUp=64,EHoldDown=128 };
 static std::vector<unsigned> editorEvents;
@@ -30,6 +34,7 @@ static std::vector<std::string> drawnText;
 static size_t eventAt;static unsigned uiFrames,uiClears;static uint32_t uiTime;
 static const uint16_t SH110X_WHITE=1,SH110X_BLACK=0;
 uint32_t millis(){return uiTime;}
+void delay(unsigned ms){CHECK(ms==1);++traceYields;}
 void input(){
     CHECK(serialChatEditing);CHECK(eventAt<editorEvents.size());const unsigned e=editorEvents[eventAt++];uiTime+=7;
     up=e&EUp;down=e&EDown;ok=e&EOk;back=e&EBack;
@@ -63,6 +68,11 @@ struct MockSerial {
 } Serial;
 namespace research {
 LabSnapshot labSnapshot(){return observed;}
+bool labStop(){++joins;if(joinFailure)return false;observed.active=false;return true;}
+bool labRawTraceEnable(bool enabled){CHECK(!observed.active);traceInfo.enabled=enabled;traceInfo.frozen=!enabled;return true;}
+RawTraceInfo labRawTraceInfo(){return traceInfo;}
+bool labRawTraceCopy(size_t index,RawTraceEntry& output){CHECK(!observed.active&&traceInfo.frozen);++traceCopies;if(traceCopyFailure||index>=traceEvents.size())return false;output=traceEvents[index];return true;}
+bool labRawTraceRelease(){CHECK(!observed.active);++traceReleases;traceInfo=RawTraceInfo{};traceEvents.clear();return true;}
 void labRequestStop(){++stops;observed.active=false;}
 bool labQueueText(const char* text,uint16_t destination){CHECK(std::strcmp(text,"TEST123")==0);++sends;sentDestination=destination;return true;}
 bool labStart(LabMode mode,const RegisterImage&,const RadioSettings& settings,TxProfile profile,uint8_t power,uint32_t step,ChatMode format,bool diagnostic,bool autoThreshold){
@@ -82,11 +92,12 @@ void printSerialScreen(){++screens;}
 void printSerialChatQueueFailure(){}
 bool pollSerialChatListen(){return true;}
 bool handleIdleSerialCommand(const char*){++diagnostics;return true;}
-void radioLabSerialPoll();void radioLabHandlePending();
+void radioLabSerialPoll();void radioLabHandlePending();void dumpCaptureTrace();
 static void runPoll(){++pollDepth;if(pollDepth>maxDepth)maxDepth=pollDepth;radioLabSerialPoll();--pollDepth;}
 void resetInput(){}
 void runSerialCaptureUi(){
     CHECK(pollDepth==0&&!inMenu);++captureCalls;
+    serialCaptureTraceRequested=false;
     serialCaptureContext=true;serialCaptureCloseRequested=serialCaptureSavePending=false;
     observed.active=true;observed.mode=LabMode::Raw;
     runPoll();CHECK(serialCaptureCloseRequested&&!observed.active&&!serialCaptureSavePending);
@@ -194,5 +205,21 @@ int main(){
     CHECK(Serial.output.find("qualifiedPulses=37 rssiQualified=1")!=std::string::npos);
     observed.captureQualifiedPulses=0;observed.captureRssiQualified=false;Serial.output.clear();testedPrintCaptureStatus();
     CHECK(Serial.output.find("qualifiedPulses=0 rssiQualified=0")!=std::string::npos);
+    const unsigned traceSends=sends;
+    Serial.feed("capturetraceopen\ncaptureclose\n");runPoll();CHECK(serialCaptureOpenPending&&serialCaptureTraceRequested);
+    radioLabHandlePending();CHECK(!serialCaptureTraceRequested&&captureCalls==2&&maxDepth==1);
+    traceEvents.resize(2);traceEvents[0]={};traceEvents[0].atUs=1000;traceEvents[0].kind=1;traceEvents[0].value=390;traceEvents[0].used=4;traceEvents[0].post=2;
+    traceEvents[1]={};traceEvents[1].atUs=2000;traceEvents[1].kind=2;traceEvents[1].phase=1;traceEvents[1].value=-44;traceEvents[1].used=7;traceEvents[1].post=5;traceEvents[1].rssiQualified=1;
+    traceInfo.count=2;traceInfo.started=traceInfo.enabled=true;traceInfo.dropped=3;Serial.output.clear();
+    dumpCaptureTrace();CHECK(traceReleases==1&&traceCopies==2&&traceYields==2&&traceInfo.count==0);
+    CHECK(Serial.output.find("[RAWTRACE] 0 1000 1 0 390 4 2 0")!=std::string::npos);
+    CHECK(Serial.output.find("[RAWTRACE] 1 2000 2 1 -44 7 5 1")!=std::string::npos);
+    CHECK(Serial.output.find("[RAWTRACE] END")!=std::string::npos&&Serial.output.find("released=1")!=std::string::npos);
+    const unsigned joined=joins;serialChatContext=true;dumpCaptureTrace();CHECK(joins==joined);serialChatContext=false;
+    joinFailure=true;dumpCaptureTrace();CHECK(traceReleases==1);joinFailure=false;
+    traceInfo.count=4097;dumpCaptureTrace();CHECK(traceReleases==1&&traceCopies==2);
+    traceInfo.count=1;traceCopyFailure=true;dumpCaptureTrace();CHECK(traceReleases==1&&traceCopies==3);traceCopyFailure=false;
+    serialCaptureContext=true;inMenu=false;observed.active=true;traceInfo.count=0;dumpCaptureTrace();
+    CHECK(!observed.active&&traceReleases==2&&sends==traceSends);serialCaptureContext=false;inMenu=true;
     std::printf("Radio serial controller: %u checks passed (actual extracted functions, UART/UI/worker doubles)\n",checks);
 }

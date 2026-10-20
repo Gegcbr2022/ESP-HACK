@@ -30,6 +30,7 @@ names=("currentChatPeer","simpleChatSend","runChatEditorPreview","serialRadioWor
 controller="\n\n".join(function(name) for name in names)
 controller += "\n\n"+function("textEntry").replace("bool textEntry(","bool testedTextEntry(",1)
 controller += "\n\n"+function("printCaptureStatus").replace("void printCaptureStatus(","void testedPrintCaptureStatus(",1)
+controller += "\n\n"+function("dumpCaptureTrace")
 main=(root/"src/main.cpp").read_text(encoding="utf-8")
 loop=main[main.index("void loop() {"):]
 if not re.match(r"void loop\(\) \{\s*if\(inMenu\) \{\s*radioLabSerialPoll\(\);\s*radioLabHandlePending\(\);\s*\}",loop):
