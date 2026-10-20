@@ -1,3 +1,6 @@
+-- @name: Stopwatch
+-- @category: Tools
+-- @description: Start, pause and measure a lap
 -- Copy to /apps/stopwatch.lua. Values are session-only; no storage writes.
 app = {}
 

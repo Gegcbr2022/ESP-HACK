@@ -1,3 +1,6 @@
+-- @name: RF Dashboard
+-- @category: Radio
+-- @description: Receive-only RSSI and carrier monitor
 -- Receive-only laboratory dashboard. Copy to /apps/rf_dashboard.lua.
 -- OK explicitly starts/stops the named 433.920 MHz / AM270 receive profile.
 app = {}

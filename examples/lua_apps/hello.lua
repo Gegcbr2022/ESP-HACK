@@ -1,3 +1,6 @@
+-- @name: Hello
+-- @category: Tools
+-- @description: Greetings and a session counter
 -- Copy to /apps/hello.lua on the SD card. No radio operations.
 app = {}
 

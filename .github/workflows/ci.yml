@@ -19,6 +19,8 @@ jobs:
       - run: python tests/portable/run_formats_tests.py --compiler g++
       - run: python tests/portable/run_lab_tests.py --compiler g++
       - run: python tests/portable/run_legacy_tests.py --compiler g++
+      - run: python tests/portable/run_app_catalog_tests.py --compiler g++
+      - run: python tests/pocket_menu/run.py --compiler g++
       - run: python tests/run_chat_tests.py --compiler g++
       - run: python tests/flipper_chat_compat/run.py --compiler g++
       - run: python tests/spi_driver_mock/run_spi_tests.py --compiler g++

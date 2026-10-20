@@ -1,7 +1,9 @@
 #include "lua_apps.h"
 #include "lua_sandbox.h"
+#include "app_catalog.h"
 #include "lab_service.h"
 #include "../subghz.h"
+#include "../interface/menu/pocket_menu.h"
 #include <Arduino.h>
 #include <SD.h>
 #include <esp_heap_caps.h>
@@ -18,7 +20,8 @@ struct Runtime {
     char radioPreset[12];
 };
 Runtime* activeApp;
-char appNames[32][41];
+research::apps::Entry* appEntries;
+research::apps::Preferences appPreferences={};
 size_t appCount;
 uint32_t clockUs(void*) { return micros(); }
 
@@ -30,7 +33,7 @@ int coordinate(lua_State* state, int index, int minimum, int maximum) {
 void drawing(lua_State* state) {
     if(!activeApp || ++activeApp->drawCalls > 256) luaL_error(state, "drawing operation quota exceeded");
 }
-int uiClear(lua_State* state) { drawing(state); display.clearDisplay(); return 0; }
+int uiClear(lua_State* state) { drawing(state); display.setFont(nullptr); display.clearDisplay(); return 0; }
 int uiText(lua_State* state) {
     drawing(state);
     const int x = coordinate(state, 1, -128, 255), y = coordinate(state, 2, -64, 127);
@@ -143,18 +146,87 @@ bool validName(const char* name) {
 }
 void listApps() {
     appCount = 0; File directory = SD.open("/apps");
-    if(!directory || !directory.isDirectory()) return;
+    if(!appEntries || !directory || !directory.isDirectory()) return;
     while(appCount < 32) {
         File item = directory.openNextFile(); if(!item) break;
         const char* path = item.name(); const char* slash = strrchr(path, '/'); const char* name = slash ? slash + 1 : path;
-        if(!item.isDirectory() && validName(name)) snprintf(appNames[appCount++], sizeof(appNames[0]), "%s", name);
+        if(!item.isDirectory() && validName(name)) {
+            research::apps::Entry& entry=appEntries[appCount++];
+            research::apps::initialize(entry,name,item.size());
+            char source[1024];const int n=item.read(reinterpret_cast<uint8_t*>(source),sizeof source);
+            if(n>0&&size_t(n)<=sizeof source)research::apps::metadata(entry,source,size_t(n));
+        }
         item.close();
     }
     directory.close();
-    for(size_t i = 1; i < appCount; ++i) for(size_t j = i; j && strcmp(appNames[j-1], appNames[j]) > 0; --j) {
-        char temporary[41]; memcpy(temporary, appNames[j-1], sizeof(temporary));
-        memcpy(appNames[j-1], appNames[j], sizeof(temporary)); memcpy(appNames[j], temporary, sizeof(temporary));
+    for(size_t i = 1; i < appCount; ++i) for(size_t j = i; j && strcmp(appEntries[j-1].title, appEntries[j].title) > 0; --j) {
+        research::apps::Entry temporary=appEntries[j-1];appEntries[j-1]=appEntries[j];appEntries[j]=temporary;
     }
+}
+void readAppPreferences() {
+    memset(&appPreferences,0,sizeof appPreferences);
+    if(!SD.exists("/apps/.launcher.cfg")&&SD.exists("/apps/.launcher.bak"))SD.rename("/apps/.launcher.bak","/apps/.launcher.cfg");
+    File file=SD.open("/apps/.launcher.cfg",FILE_READ);
+    if(!file||file.size()>1024)return;
+    char line[48];size_t used=0;bool header=false,overflow=false;
+    while(file.available()) {
+        const char c=file.read();if(c=='\r')continue;
+        if(c=='\n') {
+            line[used]=0;
+            if(!header){if(strcmp(line,"APP-LAUNCHER1"))break;header=true;}
+            else if(!overflow)research::apps::preferenceLine(appPreferences,line);
+            used=0;overflow=false;
+        } else if(used+1<sizeof line)line[used++]=c;else overflow=true;
+    }
+    file.close();
+}
+bool saveAppPreferences() {
+    const char* path="/apps/.launcher.cfg";const char* temporary="/apps/.launcher.tmp";const char* previous="/apps/.launcher.bak";
+    if(SD.exists(temporary)&&!SD.remove(temporary))return false;
+    File file=SD.open(temporary,FILE_WRITE);if(!file)return false;
+    bool good=file.print("APP-LAUNCHER1\n")==14;
+    char line[45];
+    for(size_t i=0;i<appPreferences.favoriteCount;++i) {
+        const int n=snprintf(line,sizeof line,"F %s\n",appPreferences.favorites[i]);good=good&&file.write(reinterpret_cast<uint8_t*>(line),n)==size_t(n);
+    }
+    for(size_t i=0;i<appPreferences.recentCount;++i) {
+        const int n=snprintf(line,sizeof line,"R %s\n",appPreferences.recent[i]);good=good&&file.write(reinterpret_cast<uint8_t*>(line),n)==size_t(n);
+    }
+    file.flush();file.close();
+    if(!good){SD.remove(temporary);return false;}
+    const bool hadPrevious=SD.exists(path);
+    if(hadPrevious&&SD.exists(previous)&&!SD.remove(previous)){SD.remove(temporary);return false;}
+    if(hadPrevious&&!SD.rename(path,previous)){SD.remove(temporary);return false;}
+    if(!SD.rename(temporary,path)){if(hadPrevious)SD.rename(previous,path);SD.remove(temporary);return false;}
+    if(hadPrevious)SD.remove(previous);
+    return true;
+}
+void releaseAppKeys() {
+    while(digitalRead(BUTTON_OK)==LOW||digitalRead(BUTTON_BACK)==LOW)delay(2);
+    resetButtons();
+}
+void appInformation(const research::apps::Entry& entry) {
+    releaseAppKeys();bool redraw=true;bool filePage=false;
+    while(true) {
+        buttonUp.tick();buttonDown.tick();buttonOK.tick();buttonBack.tick();
+        if(buttonBack.isClick()||buttonBack.isHolded())break;
+        if(buttonUp.isClick()||buttonDown.isClick()){filePage=!filePage;redraw=true;}
+        if(buttonOK.isClick()) {
+            if(!research::apps::toggleFavorite(appPreferences,entry.file))notice("Favorites full","Keep up to8 favorites. Remove one in its app info.");
+            else if(!saveAppPreferences())notice("SD preferences","Favorite changed in RAM; SD save failed.");
+            redraw=true;
+        }
+        if(redraw) {
+            display.clearDisplay();pocket_draw::header(display,filePage?"App file":"App info",filePage?2:1,2,true);
+            display.setCursor(0,13);display.print(entry.title);
+            const char* text=filePage?entry.file:entry.description;
+            for(size_t row=0;row<3&&row*21<strlen(text);++row){char part[22];snprintf(part,sizeof part,"%.21s",text+row*21);display.setCursor(0,23+row*8);display.print(part);}
+            char detail[22];snprintf(detail,sizeof detail,"%lu B  %s",(unsigned long)entry.bytes,research::apps::favorite(appPreferences,entry.file)?"Starred":"Not starred");
+            display.setCursor(0,47);display.print(detail);pocket_draw::footer(display,"OK star UP info BK");display.display();redraw=false;
+        }
+        delay(2);
+    }
+    releaseAppKeys();
 }
 struct ButtonState { uint8_t pin; const char* name; bool stable, observed, held; uint32_t changed, pressed; };
 bool sendInput(LuaSandbox& vm, Runtime& runtime, const char* name, const char* event) {
@@ -180,11 +252,21 @@ void sampleSelfTest(const char* name, void* bank) {
     LuaSandbox vm(bank, LuaSandbox::kHeapBytes, clockUs);
     bool good = read == length && vm.open(installBindings) && vm.load(source, length, path);
     free(source);
-    if(good) { runtime.drawCalls = 0; good = vm.tick(33); }
-    if(good) { runtime.drawCalls = 0; good = vm.draw(); }
+    unsigned frames=0;
+    for(unsigned frame=0;frame<120&&good&&!runtime.quit;++frame) {
+        if(frame%20==0) {
+            const char* button=frame%60==0?"ok":frame%60==20?"down":"up";
+            runtime.drawCalls=0;good=vm.input(button,"press");
+            if(good){runtime.drawCalls=0;good=vm.input(button,"release");}
+        }
+        if(good){runtime.drawCalls=0;good=vm.tick(33);}
+        if(good){runtime.drawCalls=0;good=vm.draw();}
+        if(good)++frames;
+        delay(1);
+    }
     if(good) display.display();
-    Serial.printf("[Lua] SAMPLE name=%s result=%s peak=%u/%u%s%s\n", name, good ? "PASS" : "FAIL",
-                  unsigned(vm.peak()), unsigned(LuaSandbox::kHeapBytes), good ? "" : " reason=",
+    Serial.printf("[Lua] SAMPLE name=%s result=%s peak=%u/%u frames=%u%s%s\n", name, good ? "PASS" : "FAIL",
+                  unsigned(vm.peak()), unsigned(LuaSandbox::kHeapBytes), frames, good ? "" : " reason=",
                   good ? "" : (read != length ? "incomplete-read" : vm.error()));
     vm.close(); activeApp = nullptr; stopOwnedRadio(runtime);
 }
@@ -243,22 +325,60 @@ void launch(const char* name) {
 void runSdApps() {
     suspendLegacyReceive();
     while(!research::labStop()) delay(10);
-    SD.mkdir("/apps"); listApps(); size_t selected = 0; resetButtons();
-    bool redraw = true;
+    if(!appEntries)appEntries=static_cast<research::apps::Entry*>(heap_caps_calloc(32,sizeof(research::apps::Entry),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    if(!appEntries){restoreReceiveMode();notice("App catalog","Not enough free memory.");return;}
+    SD.mkdir("/apps");readAppPreferences();listApps();size_t selected=0,sectionIndex=0;bool root=true;
+    research::apps::Section section=research::apps::Section::All;
+    uint8_t indices[32];size_t count=research::apps::visible(appEntries,appCount,appPreferences,section,indices);
+    releaseAppKeys();bool redraw = true;
     while(true) {
         buttonUp.tick(); buttonDown.tick(); buttonOK.tick(); buttonBack.tick();
-        if(buttonBack.isClick() || buttonBack.isHolded()) break;
-        if(buttonUp.isClick() && appCount) { selected = (selected + appCount - 1) % appCount; redraw = true; }
-        if(buttonDown.isClick() && appCount) { selected = (selected + 1) % appCount; redraw = true; }
-        if(buttonOK.isClick() && appCount) { launch(appNames[selected]); listApps(); if(selected >= appCount) selected = 0; redraw = true; }
-        if(redraw) {
-            heading("SD Apps / Lua5.4");
-            if(!appCount) { display.setCursor(0, 17); display.print("Copy .lua files to"); display.setCursor(0, 27); display.print("/apps on SD card."); }
-            else for(size_t row = 0; row < 4 && selected + row < appCount; ++row) {
-                display.setCursor(0, 15 + row * 9); display.print(row ? "  " : "> ");
-                char label[20]; snprintf(label, sizeof(label), "%.18s", appNames[selected + row]); display.print(label);
+        if(buttonBack.isClick()||buttonBack.isHolded()) {
+            if(root)break;
+            root=true;selected=sectionIndex;releaseAppKeys();redraw=true;
+        }
+        const size_t rows=root?6:count;
+        if(buttonUp.isClick()&&rows){selected=(selected+rows-1)%rows;redraw=true;}
+        if(buttonDown.isClick()&&rows){selected=(selected+1)%rows;redraw=true;}
+        if(!root&&count&&buttonOK.isHolded()) {
+            appInformation(appEntries[indices[selected]]);
+            count=research::apps::visible(appEntries,appCount,appPreferences,section,indices);
+            if(selected>=count)selected=count?count-1:0;
+            redraw=true;
+        }
+        if(buttonOK.isClick()) {
+            if(root) {
+                sectionIndex=selected;section=research::apps::Section(selected);root=false;selected=0;
+                count=research::apps::visible(appEntries,appCount,appPreferences,section,indices);redraw=true;
+            } else if(count) {
+                char name[41];snprintf(name,sizeof name,"%s",appEntries[indices[selected]].file);
+                research::apps::recordRecent(appPreferences,name);
+                if(!saveAppPreferences())Serial.println("[Lua] Launcher preferences were not saved");
+                launch(name);listApps();count=research::apps::visible(appEntries,appCount,appPreferences,section,indices);
+                if(selected>=count)selected=count?count-1:0;
+                redraw=true;
             }
-            display.setCursor(0, 56); display.print("UP/DN OK run BACK exit"); display.display(); redraw = false;
+        }
+        if(redraw) {
+            const size_t renderRows=root?6:count;
+            display.clearDisplay();pocket_draw::header(display,root?"SD Apps":research::apps::sectionName(section),renderRows?selected+1:0,renderRows,SD.exists("/apps"));
+            const size_t first=research::apps::firstRow(selected,renderRows,3);
+            for(size_t row=0;row<3&&first+row<renderRows;++row) {
+                const size_t index=first+row;char label[24];uint8_t icon=7;
+                if(root) {
+                    uint8_t temporary[32];const auto category=research::apps::Section(index);
+                    const size_t amount=research::apps::visible(appEntries,appCount,appPreferences,category,temporary);
+                    snprintf(label,sizeof label,"%s %u",research::apps::sectionName(category),unsigned(amount));
+                    icon=index==2?5:index==3?2:index==1?4:index==4?6:7;
+                } else {
+                    const auto& entry=appEntries[indices[index]];
+                    snprintf(label,sizeof label,"%s%s",research::apps::favorite(appPreferences,entry.file)?"*":"",entry.title);
+                    icon=entry.category==research::apps::Category::Games?5:entry.category==research::apps::Category::Radio?2:4;
+                }
+                pocket_draw::listRow(display,12+row*14,label,index==selected,icon);
+            }
+            if(!renderRows){display.setCursor(3,20);display.print(section==research::apps::Section::Favorites?"Hold OK on an app":"No apps in this group");display.setCursor(3,33);display.print(section==research::apps::Section::Favorites?"then OK to star it":"Copy .lua to /apps");}
+            pocket_draw::footer(display,root?"UP/DN OK open BK exit":"OK run HoldOK info BK");display.display();redraw=false;
         }
         delay(2);
     }
@@ -281,7 +401,8 @@ void sdAppsSelfTest() {
                   smokeGood && quotaGood ? "PASS" : "FAIL", LUA_RELEASE, unsigned(vm.peak()),
                   unsigned(LuaSandbox::kHeapBytes), static_cast<unsigned long>(LuaSandbox::kInstructions), static_cast<unsigned long>(LuaSandbox::kWallUs));
     vm.close(); activeApp = nullptr; stopOwnedRadio(runtime);
-    const char* samples[] = {"hello.lua", "stopwatch.lua", "rf_dashboard.lua", "snake.lua", "game2048.lua"};
+    const char* samples[] = {"hello.lua", "stopwatch.lua", "rf_dashboard.lua", "snake.lua", "game2048.lua",
+        "countdown.lua","calculator.lua","unit_converter.lua","resistor_codes.lua","blockfall.lua","mines.lua"};
     for(size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) sampleSelfTest(samples[i], bank);
     free(bank);
     returnToMainMenu();

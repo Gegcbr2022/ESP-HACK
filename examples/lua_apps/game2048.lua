@@ -1,3 +1,6 @@
+-- @name: 2048
+-- @category: Games
+-- @description: Merge tiles with four buttons
 -- 2048: UP/DOWN move vertically, OK right, BACK left. Hold BACK exits.
 app = {}
 

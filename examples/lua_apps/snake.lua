@@ -1,3 +1,6 @@
+-- @name: Snake
+-- @category: Games
+-- @description: Collect food, turn and grow
 -- Snake: UP turns left, DOWN turns right, OK starts/pauses. No radio use.
 app = {}
 
