@@ -1,5 +1,6 @@
 #include "radio_config.h"
 #include "sub_file.h"
+#include "../file_suffix.h"
 #include <assert.h>
 #include <limits.h>
 #include <math.h>
@@ -147,8 +148,18 @@ static bool testMalformedPresets() {
     return true;
 }
 static bool testParser() {
+    CHECK(fileHasSuffix("Файл.SUB",".sub"));CHECK(fileHasSuffix("x.SuB",".sub"));
+    CHECK(!fileHasSuffix("x.sub.bak",".sub"));CHECK(!fileHasSuffix("sub",".sub"));CHECK(!fileHasSuffix(nullptr,".sub"));
     const std::string good = std::string(header) + "RAW_Data: 100 -200 300\nRAW_Data: -400 2147483647 -1\n";
     CHECK(parse(good));
+    CHECK(parse(std::string("\xEF\xBB\xBF")+good));
+    CHECK(parse(std::string("\xEF"),SubError::UnsupportedEncoding));
+    CHECK(parse(std::string("\xEF\xBB"),SubError::UnsupportedEncoding));
+    CHECK(parse(std::string("\xFF\xFE")+good,SubError::UnsupportedEncoding));
+    CHECK(parse(std::string("\xFE\xFF")+good,SubError::UnsupportedEncoding));
+    SubParser bom;const std::string withBom=std::string("\xEF\xBB\xBF")+good;
+    for(size_t i=0;i<withBom.size();++i)CHECK(bom.feed(withBom[i]));
+    CHECK(bom.finish());CHECK(bom.info().raw.pulses==6);
     SubParser p;
     for(size_t i=0; i<good.size(); ++i) CHECK(p.feed(good[i]));
     CHECK(p.finish()); CHECK(p.finish());
@@ -189,6 +200,19 @@ static bool testParser() {
     SubParser keyParser; CHECK(keyParser.feed(key,sizeof key-1)); CHECK(keyParser.finish());
     CHECK(keyParser.info().bits == 24); CHECK(keyParser.info().key[5] == 0xA5);
     CHECK(!keyParser.info().rawCompatible); CHECK(!strcmp(keyParser.info().protocol,"DeveloperTest"));
+    const std::string alutech="Filetype: Flipper SubGhz Key File\nVersion: 1\nFrequency: 433920000\nPreset: FuriHalSubGhzPresetOok650Async\nProtocol: Alutech AT-4N\nBit: 72\nKey: 00 00 00 00 00 00 00 01\n";
+    CHECK(parse(alutech+"CRC: 123\n"));CHECK(parse(alutech,SubError::InvalidMetadata));
+    CHECK(parse(alutech+"CRC: 256\n",SubError::InvalidMetadata));
+    CHECK(parse(alutech+"CRC: nope\n",SubError::InvalidMetadata));
+    CHECK(parse(alutech+"CRC: 1\nCRC: 2\n",SubError::DuplicateField));
+    SubParser extended;const std::string validExtended=alutech+"CRC: 123\n";
+    CHECK(extended.feed(validExtended.data(),validExtended.size()));CHECK(extended.finish());
+    CHECK(extended.info().bits==72&&extended.info().keyBytes==8&&extended.info().extraCrc==123);
+    CHECK(!extended.info().rawCompatible);
+    const std::string guarded=std::string(key)+"Guard_time: 72\n";
+    SubParser guard;CHECK(guard.feed(guarded.data(),guarded.size()));CHECK(guard.finish());CHECK(guard.info().guardTime==72);
+    SubParser guardDefault;const std::string fallback=std::string(key)+"Guard_time: 73\n";
+    CHECK(guardDefault.feed(fallback.data(),fallback.size()));CHECK(guardDefault.finish());CHECK(guardDefault.info().guardTime==30);
     return true;
 }
 static bool testWriter() {

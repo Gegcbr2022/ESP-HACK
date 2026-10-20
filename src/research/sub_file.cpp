@@ -8,7 +8,8 @@ namespace {
 enum Fields {
     FiletypeField=1, VersionField=2, FrequencyField=4, PresetField=8,
     ModuleField=16, CustomField=32, ProtocolField=64, BitField=128,
-    TeField=256, KeyField=512, RssiField=1024, RxDeadlineField=2048, TxDeadlineField=4096
+    TeField=256, KeyField=512, RssiField=1024, RxDeadlineField=2048, TxDeadlineField=4096,
+    CrcField=8192, GuardField=16384
 };
 const uint16_t required = FiletypeField | VersionField | FrequencyField | PresetField | ProtocolField;
 bool space(char c) { return c == ' ' || c == '\t'; }
@@ -70,7 +71,7 @@ void RawStatistics::add(int32_t pulse) {
     if(duration >= 10000) ++gaps;
 }
 SubInfo::SubInfo() : kind(SubKind::Unknown), frequencyHz(0), version(0), bits(0), teUs(0),
-                     keyBytes(0), rawCompatible(false), hostFields(0), rssiThresholdDbm(-90),
+                     keyBytes(0), guardTime(30), extraCrc(0), hasExtraCrc(false), rawCompatible(false), hostFields(0), rssiThresholdDbm(-90),
                      rxTimeoutMs(5000), txLimitMs(1000) {
     preset[0] = protocol[0] = module[0] = 0;
     memset(key, 0, sizeof key);
@@ -78,7 +79,7 @@ SubInfo::SubInfo() : kind(SubKind::Unknown), frequencyHz(0), version(0), bits(0)
 SubParser::SubParser(PulseSink sink, void* context, uint32_t maxPulses)
     : sink_(sink), context_(context), maxPulses_(maxPulses), line_(1), error_(SubError::None),
       fields_(0), linePulses_(0), nameLength_(0), valueLength_(0), tokenLength_(0), customSize_(0),
-      hasColon_(false), comment_(false), rawLine_(false), lastPositive_(false), finished_(false),
+      encodingPrefix_(0), hasColon_(false), comment_(false), rawLine_(false), lastPositive_(false), finished_(false),
       radioResolved_(false), crPending_(false) {
     name_[0] = value_[0] = token_[0] = 0;
 }
@@ -101,6 +102,17 @@ bool SubParser::feed(const char* data, size_t length) {
 bool SubParser::feed(char byte) {
     if(error_ != SubError::None) return false;
     if(finished_) return fail(SubError::Syntax);
+    if(encodingPrefix_<3) {
+        const uint8_t value=uint8_t(byte);
+        if(!encodingPrefix_) {
+            if(value==0xEF){encodingPrefix_=1;return true;}
+            if(value==0xFF||value==0xFE)return fail(SubError::UnsupportedEncoding);
+            encodingPrefix_=3;
+        } else {
+            if(value!=(encodingPrefix_==1?0xBB:0xBF))return fail(SubError::UnsupportedEncoding);
+            ++encodingPrefix_;return true;
+        }
+    }
     if(crPending_) {
         if(byte != '\n') return fail(SubError::Syntax);
         crPending_ = false;
@@ -217,6 +229,15 @@ bool SubParser::field() {
         size_t length;
         if(!hexBytes(value, info_.key, sizeof info_.key, length)) return fail(SubError::InvalidMetadata);
         info_.keyBytes = uint8_t(length);
+    } else if(!strcmp(name,"Guard_time")) {
+        if(!claim(GuardField))return false;
+        if(!decimal(value,number))return fail(SubError::InvalidNumber);
+        // Official Princeton falls back to30 when an optional guard is outside15..72.
+        info_.guardTime=number>=15&&number<=72?uint8_t(number):30;
+    } else if(!strcmp(name,"CRC")) {
+        if(!claim(CrcField))return false;
+        if(decimal(value,number)){info_.extraCrc=number;info_.hasExtraCrc=true;}
+        else if(!strcmp(info_.protocol,"Alutech AT-4N"))return fail(SubError::InvalidMetadata);
     } else if(!strcmp(name, "X-ESP-RSSI")) {
         if(!claim(RssiField)) return false;
         const bool negative = *value == '-';
@@ -256,6 +277,7 @@ bool SubParser::resolveRadio() {
 bool SubParser::finish() {
     if(error_ != SubError::None) return false;
     if(finished_) return true;
+    if(encodingPrefix_==1||encodingPrefix_==2)return fail(SubError::UnsupportedEncoding);
     if(crPending_) return fail(SubError::Syntax);
     if(!endLine()) return false;
     if((fields_ & required) != required) return fail(SubError::MissingHeader);
@@ -264,7 +286,11 @@ bool SubParser::finish() {
         if(strcmp(info_.protocol, "RAW")) return fail(SubError::InvalidMetadata);
         if(!info_.raw.pulses) return fail(SubError::MissingRaw);
     } else if(!strcmp(info_.protocol, "RAW") || info_.raw.pulses) return fail(SubError::InvalidMetadata);
-    if(info_.keyBytes && info_.bits && info_.bits > unsigned(info_.keyBytes) * 8)
+    // Alutech's72bits are an8-byte Key plus a separately stored8-bit CRC.
+    // Inspecting this metadata does not provide a dynamic-code encoder.
+    const bool extendedAlutech=info_.kind==SubKind::Key&&!strcmp(info_.protocol,"Alutech AT-4N")&&
+        info_.bits==72&&info_.keyBytes==8&&info_.hasExtraCrc&&info_.extraCrc<=255;
+    if(info_.keyBytes && info_.bits && info_.bits > unsigned(info_.keyBytes) * 8 && !extendedAlutech)
         return fail(SubError::InvalidMetadata);
     finished_ = true;
     return true;
@@ -289,8 +315,33 @@ const char* SubParser::errorText() const {
     case SubError::UnsupportedModule: return "Only CC1101 custom presets supported";
     case SubError::TooManyValues: return "RAW_Data line exceeds 512 values";
     case SubError::InvalidMetadata: return "File type/protocol/key metadata mismatch";
+    case SubError::UnsupportedEncoding: return "Use UTF-8 or ASCII; UTF-16/32 are unsupported";
     }
     return "Unknown parser error";
+}
+const char* SubParser::errorTextRu() const {
+    switch(error_) {
+    case SubError::None:return "Файл прочитан";
+    case SubError::Syntax:return "Ошибка строки .sub";
+    case SubError::FieldTooLong:return "Слишком длинное поле";
+    case SubError::DuplicateField:return "Поле указано дважды";
+    case SubError::InvalidNumber:return "Неверное число в файле";
+    case SubError::MissingHeader:return "Нет заголовка .sub";
+    case SubError::UnsupportedVersion:return "Нужна версия .sub 1";
+    case SubError::InvalidFrequency:return "Частота вне диапазона";
+    case SubError::UnsupportedPreset:return "Неизвестный радиопрофиль";
+    case SubError::InvalidCustomPreset:return "Неподдержанный профиль";
+    case SubError::InvalidRaw:return "Неверные импульсы RAW";
+    case SubError::PulseLimit:return "Слишком длинная запись";
+    case SubError::SinkRejected:return "Не удалось загрузить RAW";
+    case SubError::MissingRaw:return "В файле нет импульсов";
+    case SubError::UnsupportedFiletype:return "Это не файл Flipper .sub";
+    case SubError::UnsupportedModule:return "Нужен профиль CC1101";
+    case SubError::TooManyValues:return "Больше 512 чисел в строке";
+    case SubError::InvalidMetadata:return "Поля файла не совпадают";
+    case SubError::UnsupportedEncoding:return "Сохраните .sub в UTF-8";
+    }
+    return "Ошибка чтения файла";
 }
 
 bool settingsFromSub(const SubInfo& info, RadioSettings& settings, const char** error) {

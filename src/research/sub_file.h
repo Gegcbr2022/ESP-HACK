@@ -20,7 +20,7 @@ enum class SubError : uint8_t {
     None, Syntax, FieldTooLong, DuplicateField, InvalidNumber, MissingHeader,
     UnsupportedVersion, InvalidFrequency, UnsupportedPreset, InvalidCustomPreset,
     InvalidRaw, PulseLimit, SinkRejected, MissingRaw, UnsupportedFiletype,
-    UnsupportedModule, TooManyValues, InvalidMetadata
+    UnsupportedModule, TooManyValues, InvalidMetadata, UnsupportedEncoding
 };
 
 struct SubInfo {
@@ -33,6 +33,9 @@ struct SubInfo {
     uint16_t bits;
     uint32_t teUs;
     uint8_t key[8], keyBytes;
+    uint8_t guardTime;
+    uint32_t extraCrc;
+    bool hasExtraCrc;
     bool rawCompatible; // Async ASK/OOK or 2-FSK/GFSK only; never implies TX permission.
     uint8_t hostFields; // bit0 RSSI, bit1 RX deadline, bit2 TX deadline; optional X-ESP metadata.
     int16_t rssiThresholdDbm;
@@ -57,6 +60,7 @@ public:
     const SubInfo& info() const { return info_; }
     SubError error() const { return error_; }
     const char* errorText() const;
+    const char* errorTextRu() const;
     uint32_t line() const { return line_; }
 private:
     bool fail(SubError error);
@@ -76,6 +80,7 @@ private:
     size_t nameLength_, valueLength_, tokenLength_;
     uint8_t custom_[kMaxPresetBytes];
     size_t customSize_;
+    uint8_t encodingPrefix_;
     bool hasColon_, comment_, rawLine_, lastPositive_, finished_, radioResolved_, crPending_;
 };
 

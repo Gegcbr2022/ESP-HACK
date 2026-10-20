@@ -1,4 +1,5 @@
 #include "explorer.h"
+#include "file_suffix.h"
 
 extern bool ensureSDReadyInteractive(bool allowSkip);
 extern void showSDInitErrorScreen();
@@ -152,7 +153,7 @@ static bool explorerIsHidden(const String& name) {
 static bool explorerMatchesExtension(const String& name, const ExplorerConfig& cfg) {
   if (cfg.extCount == 0 || cfg.extensions == nullptr) return true;
   for (uint8_t i = 0; i < cfg.extCount; i++) {
-    if (name.endsWith(cfg.extensions[i])) return true;
+    if (fileHasSuffix(name.c_str(),cfg.extensions[i])) return true;
   }
   return false;
 }
