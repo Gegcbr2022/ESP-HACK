@@ -271,8 +271,8 @@ void sampleSelfTest(const char* name, void* bank) {
         delay(1);
     }
     if(good) display.display();
-    Serial.printf("[Lua] SAMPLE name=%s result=%s peak=%u/%u frames=%u maxCallUs=%lu lastCallUs=%lu phase=%s%s%s\n", name, good ? "PASS" : "FAIL",
-                  unsigned(vm.peak()), unsigned(LuaSandbox::kHeapBytes), frames, static_cast<unsigned long>(peakUs),static_cast<unsigned long>(lastUs),phase,good ? "" : " reason=",
+    Serial.printf("[Lua] SAMPLE name=%s result=%s peak=%u/%u frames=%u maxCallUs=%lu lastCallUs=%lu instructions=%lu phase=%s%s%s\n", name, good ? "PASS" : "FAIL",
+                  unsigned(vm.peak()), unsigned(LuaSandbox::kHeapBytes), frames, static_cast<unsigned long>(peakUs),static_cast<unsigned long>(lastUs),static_cast<unsigned long>(vm.instructions()),phase,good ? "" : " reason=",
                   good ? "" : (read != length ? "incomplete-read" : vm.error()));
     vm.close(); activeApp = nullptr; stopOwnedRadio(runtime);
 }
@@ -331,6 +331,7 @@ void launch(const char* name) {
 void runSdApps() {
     suspendLegacyReceive();
     while(!research::labStop()) delay(10);
+    Serial.printf("[Lua] device CPU=%luMHz drawWallUs=%lu callbackWallUs=%lu\n",static_cast<unsigned long>(getCpuFrequencyMhz()),static_cast<unsigned long>(LuaSandbox::kDrawWallUs),static_cast<unsigned long>(LuaSandbox::kWallUs));
     if(!appEntries)appEntries=static_cast<research::apps::Entry*>(heap_caps_calloc(32,sizeof(research::apps::Entry),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
     if(!appEntries){restoreReceiveMode();notice("App catalog","Not enough free memory.");return;}
     SD.mkdir("/apps");readAppPreferences();listApps();size_t selected=0,sectionIndex=0;bool root=true;
@@ -398,6 +399,7 @@ void sdAppsSelfTest() {
     // callback's wall-time budget while the diagnostic owns the device.
     suspendLegacyReceive();
     while(!research::labStop()) delay(10);
+    Serial.printf("[Lua] device CPU=%luMHz drawWallUs=%lu callbackWallUs=%lu\n",static_cast<unsigned long>(getCpuFrequencyMhz()),static_cast<unsigned long>(LuaSandbox::kDrawWallUs),static_cast<unsigned long>(LuaSandbox::kWallUs));
     void* bank = heap_caps_malloc(LuaSandbox::kHeapBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if(!bank) { Serial.println("[Lua] SELFTEST FAIL heap allocation"); restoreReceiveMode(); return; }
     Runtime runtime = {}; runtime.diagnostic = true; activeApp = &runtime;

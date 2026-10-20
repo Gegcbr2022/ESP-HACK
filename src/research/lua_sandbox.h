@@ -106,9 +106,12 @@ public:
     static const size_t kSourceBytes = 32 * 1024;
     static const uint32_t kInstructions = 100000;
     static const uint32_t kWallUs = 5000;
+    // The physical SH1106 framebuffer paths take about6ms for the game boards.
+    // Drawing gets10ms within the33ms frame; input/tick/load retain5ms.
+    static const uint32_t kDrawWallUs = 10000;
     LuaSandbox(void* bank, size_t bytes, Clock clock, void* clockContext = nullptr)
         : arena_(bank, bytes), state_(nullptr), clock_(clock), clockContext_(clockContext),
-          started_(0), operations_(0), argument_(0), callback_(nullptr), first_(nullptr), second_(nullptr), numeric_(false) {
+          started_(0), operations_(0), wallLimit_(kWallUs), argument_(0), callback_(nullptr), first_(nullptr), second_(nullptr), numeric_(false) {
         error_[0] = 0;
     }
     ~LuaSandbox() { close(); }
@@ -128,7 +131,7 @@ public:
     bool load(const char* source, size_t length, const char* name) {
         if(!state_ || !source || length > kSourceBytes) { setError("Script exceeds 32 KiB source limit"); return false; }
         if(luaL_loadbufferx(state_, source, length, name, "t") != LUA_OK) return captureError();
-        return protectedCall();
+        return protectedCall(kWallUs);
     }
     bool draw() { return invoke("draw", nullptr, nullptr, false, 0); }
     bool tick(uint32_t milliseconds) { return invoke("tick", nullptr, nullptr, true, milliseconds); }
@@ -188,17 +191,17 @@ private:
     }
     static void hook(lua_State* state, lua_Debug*) {
         LuaSandbox* self = owner(state); self->operations_ += 500;
-        if(self->operations_ >= kInstructions || uint32_t(self->now() - self->started_) >= kWallUs)
+        if(self->operations_ >= kInstructions || uint32_t(self->now() - self->started_) >= self->wallLimit_)
             luaL_error(state, "execution quota exceeded");
     }
     uint32_t now() const { return clock_ ? clock_(clockContext_) : 0; }
-    bool protectedCall() {
-        started_ = now(); operations_ = 0;
+    bool protectedCall(uint32_t wallLimit) {
+        started_ = now(); operations_ = 0;wallLimit_=wallLimit;
         lua_sethook(state_, hook, LUA_MASKCOUNT, 500);
         const int result = lua_pcall(state_, 0, 0, 0);
         lua_sethook(state_, nullptr, 0, 0);
         if(result != LUA_OK) return captureError();
-        if(uint32_t(now() - started_) >= kWallUs) { setError("callback exceeded wall time quota"); return false; }
+        if(uint32_t(now() - started_) >= wallLimit_) { setError("callback exceeded wall time quota"); return false; }
         return true;
     }
     bool captureError() {
@@ -226,13 +229,13 @@ private:
     bool invoke(const char* callback, const char* first, const char* second, bool numeric, lua_Integer argument) {
         if(!state_) return false;
         callback_ = callback; first_ = first; second_ = second; numeric_ = numeric; argument_ = argument;
-        lua_pushcfunction(state_, dispatch); return protectedCall();
+        lua_pushcfunction(state_, dispatch); return protectedCall(!strcmp(callback,"draw")?kDrawWallUs:kWallUs);
     }
     LuaArena arena_;
     lua_State* state_;
     Clock clock_;
     void* clockContext_;
-    uint32_t started_, operations_;
+    uint32_t started_, operations_, wallLimit_;
     lua_Integer argument_;
     const char* callback_;
     const char* first_;
