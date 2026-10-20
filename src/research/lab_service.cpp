@@ -512,6 +512,17 @@ bool retainRawCandidate(TriggeredCapture& trigger,uint32_t receiveStartedMs,bool
     status(accepted?"Signal retained: listening for next":"Rearmed after discarded candidate");
     return true;
 }
+void stopRawCandidate(TriggeredCapture& trigger,const raw_capture::Snapshot& counters) {
+    if(activeRawHistory) {
+        // History accepts only live quiet-policy completions. Manual pause or
+        // timeout must not promote a qualified prefix of an ongoing frame.
+        if(!historyCandidateStored&&trigger.phase()==TriggeredCapture::Phase::Capturing) {
+            ++rawHistoryDiscarded;publishCaptureHistory();
+            status("Partial candidate discarded on pause");
+        }
+    } else trigger.stop(micros()); // Preserve advanced single/manual capture.
+    publishRaw(trigger,counters);
+}
 bool transmitPacket(const uint8_t* data, size_t length) {
     if(length > 60 || !permitLabTx(activeProfile, activeSettings.frequencyHz, 100,
                                    activeSettings.txLimitMs)) return false;
@@ -728,9 +739,7 @@ void worker(void*) {
         drainRaw(rawTrigger, true);
         const auto finalCapture = raw_capture::snapshot();
         rawTrigger.integrity(finalCapture.dropped, finalCapture.rejected);
-        rawTrigger.stop(micros()); publishRaw(rawTrigger, finalCapture);
-        if(activeRawHistory&&rawTrigger.complete()&&!historyCandidateStored)
-            retainRawCandidate(rawTrigger,rxStart,false);
+        stopRawCandidate(rawTrigger,finalCapture);
         traceRaw(3,micros(),int32_t(rawTrigger.rearmCount()),rawTrigger);freezeRawTrace();
     }
     idle(); pinMode(CC1101_GDO0, INPUT);
