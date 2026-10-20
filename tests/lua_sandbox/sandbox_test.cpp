@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <string>
+#include <vector>
+#include <stdlib.h>
 
 using research::LuaArena;
 using research::LuaSandbox;
@@ -14,17 +16,23 @@ static uint32_t clock_us(void* opaque) {
     FakeClock& clock=*static_cast<FakeClock*>(opaque);
     const uint32_t now=clock.now; clock.now+=clock.step; return now;
 }
+struct TextDraw { int x, y; std::string value; };
+struct RectDraw { int x, y, w, h; };
 struct MockSdk {
     uint32_t millis, samples, starts, stops, drawCalls;
     bool quit, active, connected;
     std::string lastText;
+    std::vector<TextDraw> texts;
+    std::vector<RectDraw> rectangles;
     MockSdk():millis(0),samples(0),starts(0),stops(0),drawCalls(0),quit(false),active(false),connected(false) {}
 };
 static MockSdk* current;
 static void drawing(lua_State* state) {
     if(++current->drawCalls>256) luaL_error(state,"drawing operation quota exceeded");
 }
-static int clear(lua_State* state) { drawing(state); return 0; }
+static int clear(lua_State* state) {
+    drawing(state); current->texts.clear(); current->rectangles.clear(); return 0;
+}
 static int text(lua_State* state) {
     drawing(state);
     const int x=int(luaL_checkinteger(state,1)),y=int(luaL_checkinteger(state,2));
@@ -34,7 +42,8 @@ static int text(lua_State* state) {
         return luaL_error(state,"sample text outside visible screen");
     for(size_t i=0;i<length;++i) if(uint8_t(value[i])<32||uint8_t(value[i])>126)
         return luaL_error(state,"text must be printable ASCII");
-    current->lastText.assign(value,length); return 0;
+    current->lastText.assign(value,length);
+    current->texts.push_back(TextDraw{x,y,current->lastText}); return 0;
 }
 static int line(lua_State* state) {
     drawing(state);
@@ -50,7 +59,7 @@ static int rect(lua_State* state) {
     const int w=int(luaL_checkinteger(state,3)),h=int(luaL_checkinteger(state,4));
     if(x<0||y<0||w<0||h<0||x+w>128||y+h>64) return luaL_error(state,"sample rectangle outside screen");
     if(!lua_isnoneornil(state,5)&&!lua_isboolean(state,5)) return luaL_error(state,"filled must be boolean");
-    return 0;
+    current->rectangles.push_back(RectDraw{x,y,w,h}); return 0;
 }
 static int pixel(lua_State* state) {
     drawing(state); const int x=int(luaL_checkinteger(state,1)),y=int(luaL_checkinteger(state,2));
@@ -148,7 +157,136 @@ static bool read_file(const char* path,std::string& output) {
     char block[4096]; size_t size; while((size=fread(block,1,sizeof block,file))) output.append(block,size);
     const bool ok=!ferror(file); fclose(file); return ok;
 }
-static bool example_test(const char* path,bool radioApp) {
+static bool has_text(const MockSdk& mock,const char* value) {
+    for(size_t i=0;i<mock.texts.size();++i) {
+        if(mock.texts[i].value.find(value)!=std::string::npos) return true;
+    }
+    return false;
+}
+static bool has_rect(const MockSdk& mock,int x,int y,int w,int h) {
+    for(size_t i=0;i<mock.rectangles.size();++i) {
+        const RectDraw& r=mock.rectangles[i];
+        if(r.x==x&&r.y==y&&r.w==w&&r.h==h) return true;
+    }
+    return false;
+}
+static unsigned snake_cells(const MockSdk& mock) {
+    unsigned count=0;
+    for(size_t i=0;i<mock.rectangles.size();++i) {
+        if(mock.rectangles[i].w==4&&mock.rectangles[i].h==4) ++count;
+    }
+    return count;
+}
+static bool draw_frame(LuaSandbox& vm,MockSdk& mock) {
+    mock.drawCalls=0;
+    CHECK(vm.draw()); CHECK(vm.instructions()<=LuaSandbox::kInstructions);
+    return true;
+}
+static bool snake_game_test(const char* path) {
+    std::string source; CHECK(read_file(path,source));
+    alignas(16) uint8_t bank[LuaSandbox::kHeapBytes]; FakeClock clock={0,0}; MockSdk mock; current=&mock;
+    LuaSandbox vm(bank,sizeof bank,clock_us,&clock); CHECK(vm.open(bindings));
+    CHECK(vm.load(source.data(),source.size(),path)); CHECK(draw_frame(vm,mock));
+    CHECK(has_text(mock,"UP turns left")); CHECK(has_text(mock,"DOWN turns right"));
+    CHECK(vm.input("ok","release")); CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"OK starts"));
+    CHECK(vm.input("ok","press")); CHECK(draw_frame(vm,mock)); CHECK(snake_cells(mock)==3);
+    CHECK(has_rect(mock,41,32,4,4));
+    CHECK(vm.input("ok","press")); mock.millis+=500; CHECK(vm.tick(33));
+    CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"PAUSE")); CHECK(has_rect(mock,31,32,4,4));
+    CHECK(vm.input("ok","press")); mock.millis+=179; CHECK(vm.tick(33));
+    CHECK(draw_frame(vm,mock)); CHECK(!has_rect(mock,46,32,4,4));
+    ++mock.millis; CHECK(vm.tick(33)); CHECK(draw_frame(vm,mock));
+    CHECK(has_rect(mock,46,32,4,4)); CHECK(!has_rect(mock,31,32,4,4));
+    CHECK(vm.input("up","press")); CHECK(vm.input("down","press"));
+    mock.millis+=180; CHECK(vm.tick(33)); CHECK(draw_frame(vm,mock));
+    CHECK(has_rect(mock,46,27,4,4)); // Only one queued turn is accepted per movement.
+
+    vm.close(); mock.millis=0; CHECK(vm.open(bindings));
+    CHECK(vm.load(source.data(),source.size(),path)); CHECK(vm.input("ok","press"));
+    // Deterministic seed zero puts food at (23,0), reachable from the initial head.
+    for(unsigned i=0;i<15;++i) { mock.millis+=180; CHECK(vm.tick(33)); }
+    CHECK(vm.input("up","press"));
+    for(unsigned i=0;i<4;++i) { mock.millis+=180; CHECK(vm.tick(33)); }
+    CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"SNAKE 1")); CHECK(snake_cells(mock)==4);
+    mock.millis+=180; CHECK(vm.tick(33)); CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"GAME OVER"));
+    CHECK(vm.input("ok","press")); CHECK(draw_frame(vm,mock));
+    CHECK(snake_cells(mock)==3); CHECK(has_text(mock,"SNAKE 0")); CHECK(!has_text(mock,"GAME OVER"));
+
+    vm.close(); mock.millis=UINT32_MAX-100; CHECK(vm.open(bindings));
+    CHECK(vm.load(source.data(),source.size(),path)); CHECK(vm.input("ok","press"));
+    mock.millis+=80; CHECK(vm.tick(33)); CHECK(draw_frame(vm,mock)); CHECK(!has_rect(mock,46,32,4,4));
+    mock.millis+=100; CHECK(vm.tick(33)); CHECK(draw_frame(vm,mock)); CHECK(has_rect(mock,46,32,4,4));
+    CHECK(vm.input("back","press")); CHECK(mock.quit); CHECK(mock.starts==0&&mock.stops==0);
+    CHECK(vm.peak()<=sizeof bank); vm.close(); CHECK(vm.used()==0);
+    return true;
+}
+static void read_2048(const MockSdk& mock,unsigned board[16],unsigned& score,unsigned& moves) {
+    memset(board,0,16*sizeof *board); score=moves=0;
+    for(size_t i=0;i<mock.texts.size();++i) {
+        const TextDraw& text=mock.texts[i];
+        const size_t s=text.value.find("S:");
+        if(s!=std::string::npos) score=unsigned(strtoul(text.value.c_str()+s+2,nullptr,10));
+        if(text.x==86&&text.y==0) moves=unsigned(strtoul(text.value.c_str()+2,nullptr,10));
+        if(text.y>=13&&text.y<=43&&(text.y-13)%10==0) {
+            unsigned value=unsigned(strtoul(text.value.c_str(),nullptr,10));
+            if(text.value.find('K')!=std::string::npos) value*=1024;
+            if(text.value.find('M')!=std::string::npos) value*=1048576;
+            board[((text.y-13)/10)*4+text.x/32]=value;
+        }
+    }
+}
+static bool game2048_test(const char* path) {
+    std::string source; CHECK(read_file(path,source));
+    alignas(16) uint8_t bank[LuaSandbox::kHeapBytes]; FakeClock clock={0,0}; MockSdk mock; current=&mock;
+    LuaSandbox vm(bank,sizeof bank,clock_us,&clock); CHECK(vm.open(bindings));
+    CHECK(vm.load(source.data(),source.size(),path)); CHECK(draw_frame(vm,mock));
+    CHECK(has_text(mock,"Hold BACK to exit")); CHECK(has_text(mock,"OK right   BACK left"));
+    CHECK(vm.input("ok","press")); CHECK(draw_frame(vm,mock));
+    unsigned before[16],scoreBefore,movesBefore; read_2048(mock,before,scoreBefore,movesBefore);
+    unsigned initialTiles=0; for(unsigned i=0;i<16;++i) if(before[i]) ++initialTiles;
+    CHECK(initialTiles==2); CHECK(scoreBefore==0&&movesBefore==0);
+    unsigned merges=0,ends=0,successful=0,seed=1;
+    const char* buttons[]={"up","down","ok","back"};
+    for(unsigned turn=0;turn<1200;++turn) {
+        const bool over=has_text(mock,"GAME OVER");
+        if(over) {
+            ++ends; CHECK(vm.input("ok","press")); CHECK(draw_frame(vm,mock));
+            read_2048(mock,before,scoreBefore,movesBefore); CHECK(scoreBefore==0&&movesBefore==0);
+        }
+        seed=seed*1664525U+1013904223U;
+        const char* button=buttons[(seed>>28)%4];
+        CHECK(vm.input(button,"release")); CHECK(vm.input(button,"hold")); CHECK(draw_frame(vm,mock));
+        unsigned unchanged[16],s,m; read_2048(mock,unchanged,s,m);
+        CHECK(!memcmp(before,unchanged,sizeof before)); CHECK(s==scoreBefore&&m==movesBefore);
+        CHECK(vm.input(button,"press")); CHECK(draw_frame(vm,mock));
+        unsigned after[16],scoreAfter,movesAfter; read_2048(mock,after,scoreAfter,movesAfter);
+        unsigned massBefore=0,massAfter=0;
+        for(unsigned i=0;i<16;++i) {
+            massBefore+=before[i]; massAfter+=after[i];
+            CHECK(after[i]==0||(after[i]>=2&&(after[i]&(after[i]-1))==0));
+        }
+        if(movesAfter==movesBefore) {
+            CHECK(!memcmp(before,after,sizeof before)); CHECK(scoreAfter==scoreBefore);
+        } else {
+            ++successful; CHECK(movesAfter==movesBefore+1);
+            CHECK(massAfter==massBefore+2||massAfter==massBefore+4);
+            CHECK(scoreAfter>=scoreBefore); if(scoreAfter>scoreBefore) ++merges;
+        }
+        if(has_text(mock,"GAME OVER")) {
+            for(unsigned i=0;i<16;++i) {
+                CHECK(after[i]!=0);
+                if(i%4!=3) CHECK(after[i]!=after[i+1]);
+                if(i<12) CHECK(after[i]!=after[i+4]);
+            }
+        }
+        memcpy(before,after,sizeof before); scoreBefore=scoreAfter; movesBefore=movesAfter;
+    }
+    CHECK(successful>500); CHECK(merges>100); CHECK(ends>0); CHECK(!mock.quit);
+    CHECK(mock.starts==0&&mock.stops==0); CHECK(vm.peak()<=sizeof bank);
+    vm.close(); CHECK(vm.used()==0);
+    return true;
+}
+static bool example_test(const char* path,unsigned kind) {
     std::string source; CHECK(read_file(path,source)); CHECK(source.size()<=LuaSandbox::kSourceBytes);
     alignas(16) uint8_t bank[LuaSandbox::kHeapBytes]; FakeClock clock={0,0}; MockSdk mock; current=&mock;
     LuaSandbox vm(bank,sizeof bank,clock_us,&clock); CHECK(vm.open(bindings));
@@ -158,6 +296,7 @@ static bool example_test(const char* path,bool radioApp) {
         if(frame%90==0) { mock.drawCalls=0; CHECK(vm.input("ok","press")); CHECK(vm.input("ok","release")); }
         if(frame%150==0) { mock.drawCalls=0; CHECK(vm.input("up","press")); CHECK(vm.input("up","hold")); CHECK(vm.input("up","release")); }
         if(frame%210==0) { mock.drawCalls=0; CHECK(vm.input("down","press")); CHECK(vm.input("down","release")); }
+        if(kind==3&&frame%270==0) { CHECK(vm.input("back","press")); CHECK(vm.input("back","release")); }
         mock.drawCalls=0; CHECK(vm.tick(33)); mock.drawCalls=0;
         if(!vm.draw()) { fprintf(stderr,"Sample %s: %s\n",path,vm.error()); return false; }
         ++checks; CHECK(vm.peak()<=sizeof bank);
@@ -165,14 +304,16 @@ static bool example_test(const char* path,bool radioApp) {
     // Exercise millis wrap while callbacks continue with a bounded displayed value.
     mock.millis=UINT32_MAX-20; CHECK(vm.tick(33)); mock.millis=12; CHECK(vm.tick(33));
     mock.drawCalls=0; CHECK(vm.draw());
-    CHECK(vm.input("back","press")); CHECK(mock.quit);
-    CHECK(radioApp ? (mock.starts>0&&mock.stops>0) : (mock.starts==0&&mock.stops==0));
+    CHECK(vm.input("back","press")); CHECK(kind==3 ? !mock.quit : mock.quit);
+    CHECK(kind==1 ? (mock.starts>0&&mock.stops>0) : (mock.starts==0&&mock.stops==0));
     printf("Lua sample %s: peak %u/%u bytes\n",path,unsigned(vm.peak()),unsigned(sizeof bank));
     vm.close(); CHECK(vm.used()==0); return true;
 }
 int main(int argc,char** argv) {
-    if(argc!=4) { fprintf(stderr,"Pass hello.lua stopwatch.lua rf_dashboard.lua\n"); return 2; }
-    if(!allocator_tests()||!vm_tests()||!example_test(argv[1],false)||!example_test(argv[2],false)||!example_test(argv[3],true)) return 1;
-    printf("Lua sandbox: %u checks passed (real Lua VM/allocator, quotas, APIs, callbacks, 4500 sample frames)\n",checks);
+    if(argc!=6) { fprintf(stderr,"Pass hello.lua stopwatch.lua rf_dashboard.lua snake.lua game2048.lua\n"); return 2; }
+    if(!allocator_tests()||!vm_tests()||!example_test(argv[1],0)||!example_test(argv[2],0)||!example_test(argv[3],1)||
+       !example_test(argv[4],2)||!example_test(argv[5],3)||
+       !snake_game_test(argv[4])||!game2048_test(argv[5])) return 1;
+    printf("Lua sandbox: %u checks passed (real Lua VM/allocator, quotas, APIs, callbacks, 7500 sample frames)\n",checks);
     return 0;
 }

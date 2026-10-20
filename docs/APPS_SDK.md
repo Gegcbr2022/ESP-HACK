@@ -15,6 +15,8 @@ Create `/apps` on the SD card and copy these source examples there:
 | `examples/lua_apps/hello.lua` | Three greetings and a session counter | OK/DOWN next, UP previous, BACK exit |
 | `examples/lua_apps/stopwatch.lua` | Millisecond-clock stopwatch with one lap | OK start/pause, UP lap, DOWN reset, BACK exit |
 | `examples/lua_apps/rf_dashboard.lua` | Receive-only 433.920 MHz / AM270 RSSI and carrier view | OK start/stop receiver, BACK stop/exit |
+| `examples/lua_apps/snake.lua` | Snake with food, increasing speed, pause and restart | UP turn left, DOWN turn right, OK start/pause/retry, BACK exit |
+| `examples/lua_apps/game2048.lua` | 4x4 merging puzzle, score and game-over/restart | UP up, DOWN down, OK right/start/retry, short BACK left; hold BACK exit |
 
 Then open **SD Apps** from the main menu and select the filename. Hold BACK to
 leave any app. Files must have an ASCII stem containing only letters, numbers,

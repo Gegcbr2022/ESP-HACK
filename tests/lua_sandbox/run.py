@@ -37,7 +37,8 @@ def run(build):
     command += [str(obj) for obj in objects]+["-o",str(executable)]
     subprocess.run(command,check=True)
     examples=root/"examples"/"lua_apps"
-    subprocess.run([str(executable),str(examples/"hello.lua"),str(examples/"stopwatch.lua"),str(examples/"rf_dashboard.lua")],check=True)
+    subprocess.run([str(executable),str(examples/"hello.lua"),str(examples/"stopwatch.lua"),str(examples/"rf_dashboard.lua"),
+                    str(examples/"snake.lua"),str(examples/"game2048.lua")],check=True)
 if args.build_dir: run(args.build_dir.resolve())
 else:
     with tempfile.TemporaryDirectory(prefix="esp-hack-lua-tests-") as directory: run(Path(directory))
