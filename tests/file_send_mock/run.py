@@ -23,7 +23,7 @@ def function(name):
             depth-=1
             if not depth: return source[match.start():opening+token.end()]
     raise RuntimeError("Unclosed production function: "+name)
-functions="\n\n".join(function(name) for name in ("prepareOpenedFileSend","sendOpenedFile","serialPrincetonTestFrequency","saveCapture","captureProgressText","startMode","captureApp"))
+functions="\n\n".join(function(name) for name in ("prepareOpenedFileSend","sendOpenedFile","playSavedCaptureHistory","serialPrincetonTestFrequency","saveCapture","captureProgressText","startMode","captureApp"))
 template=(root/"tests/file_send_mock/file_send_test.cpp").read_text(encoding="utf-8")
 with tempfile.TemporaryDirectory(prefix="esp-hack-file-send-") as directory:
     build=Path(directory);generated=build/"file_send.cpp"

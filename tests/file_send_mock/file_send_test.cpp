@@ -16,6 +16,8 @@ RadioSettings settings;RegisterImage radio;TxProfile profile=TxProfile::ReceiveO
 SubInfo openedInfo;bool openedFileValid;int32_t waveform[kWaveformCapacity];size_t waveformCount;
 bool back,holdBack,holdOk,ok;
 bool serialCaptureContext,serialCaptureSavePending;
+bool serialCaptureHistoryContext,serialCaptureCloseRequested;
+size_t captureHistorySelection;uint8_t captureHistorySavedMask;int8_t captureHistorySavedPathSlot=-1;
 uint32_t sweepStep=25000;ChatMode chatFormat=ChatMode::FlipperPlaintext;
 // The UI fixture uses only this fixed short preset label; custom/imported
 // preset names and the display driver's clipping are outside this radio test.
@@ -27,6 +29,7 @@ static bool transmitSuccess=true;
 static LabSnapshot captureState={};static bool stopSuccess=true,waveWrite=true,uniqueSuccess=true;
 static size_t captureCount=4;static unsigned savedCalls;
 static bool startSuccess=true,lastAutomatic;static unsigned captureStarts;
+static bool reopenSuccess=true;static uint64_t reopenDuration=600;
 char notice[80]="",captureSavedPath[112]="";
 static std::vector<unsigned> events;static size_t eventAt;
 static std::vector<std::string> rendered;
@@ -38,9 +41,10 @@ void title(const char*){}
 void line(unsigned,const char* text){rendered.push_back(text);}
 void footer(const char*){}
 struct Display {void display(){}} display;
-struct MockSerial {void printf(const char* format,...){char text[256];va_list args;va_start(args,format);std::vsnprintf(text,sizeof(text),format,args);va_end(args);rendered.push_back(text);}} Serial;
+struct MockSerial {void println(const char* text){rendered.push_back(text);}void printf(const char* format,...){char text[256];va_list args;va_start(args,format);std::vsnprintf(text,sizeof(text),format,args);va_end(args);rendered.push_back(text);}} Serial;
 void message(const char*,const char* text){++messages;rendered.push_back(text);}
 bool printPlaybackRadioState(const char*){return true;}
+bool inspectFile(const char* path);
 void showNotice(const char* text){std::snprintf(notice,sizeof notice,"%s",text);}
 bool uniquePath(char* output,size_t capacity,const char* folder,const char* prefix){CHECK(!std::strcmp(folder,"/subghz")&&!std::strcmp(prefix,"LabRAW"));std::snprintf(output,capacity,"/subghz/LabRAW_0001.sub");return uniqueSuccess;}
 bool saveWave(const char* path){++savedCalls;CHECK(!std::strcmp(path,"/subghz/LabRAW_0001.sub"));CHECK(waveformCount==captureCount);return waveWrite;}
@@ -48,7 +52,7 @@ namespace research {
 int32_t radioCalibrationPpm(){return trim;}
 bool labStop(){return stopSuccess;}
 LabSnapshot labSnapshot(){return captureState;}
-bool labStart(LabMode mode,const RegisterImage&,const RadioSettings&,TxProfile,uint8_t,uint32_t,ChatMode,bool diagnostic,bool automatic){CHECK(mode==LabMode::Raw&&!diagnostic);++captureStarts;lastAutomatic=automatic;return startSuccess;}
+bool labStart(LabMode mode,const RegisterImage&,const RadioSettings&,TxProfile,uint8_t,uint32_t,ChatMode,bool diagnostic,bool automatic,bool multiple){CHECK(mode==LabMode::Raw&&!diagnostic&&!multiple);++captureStarts;lastAutomatic=automatic;return startSuccess;}
 size_t labCopyPulses(int32_t* output,size_t capacity){CHECK(output==waveform&&capacity==kWaveformCapacity);for(size_t i=0;i<captureCount;++i)output[i]=i%2?-100:100;return captureCount;}
 bool labTransmitRaw(const int32_t* pulses,size_t count,const RegisterImage& image,uint32_t hz,TxProfile tx,uint8_t power,uint32_t limit,uint32_t& elapsed,int32_t& timing){
     ++transmissions;CHECK(hz==expectedHz);CHECK(tx==TxProfile::FilePlayback);CHECK(power==1&&limit==5000);
@@ -70,6 +74,7 @@ static void fixture(uint32_t hz,SubKind kind=SubKind::Raw){
     if(kind==SubKind::Raw)std::strcpy(openedInfo.protocol,"RAW");
     else {std::strcpy(openedInfo.protocol,"Princeton");openedInfo.bits=24;openedInfo.teUs=390;openedInfo.keyBytes=8;openedInfo.key[5]=0xA5;openedInfo.key[6]=0x3A;openedInfo.key[7]=0x53;}
 }
+bool inspectFile(const char* path){CHECK(!std::strcmp(path,captureSavedPath));if(!reopenSuccess){openedFileValid=false;waveformCount=0;return false;}fixture(906400000);openedInfo.raw.durationUs=reopenDuration;return true;}
 static void run(std::initializer_list<unsigned> inputEvents,bool expectedSend,TxProfile priorProfile=TxProfile::ShieldedLab){
     CHECK(loadPreset("FM476",radio));CHECK(describeRadio(radio,868350000,settings));
     settings.agc0=0x42;settings.txLimitMs=1234;profile=priorProfile;powerIndex=2;
@@ -133,5 +138,16 @@ int main(){
     captureState={};captureState.captureTriggered=captureState.captureComplete=true;captureState.rawThresholdReady=true;
     serialCaptureContext=serialCaptureSavePending=true;events={0,Cancel};eventAt=0;rendered.clear();
     captureApp(false,true);CHECK(!serialCaptureSavePending&&has("[Capture] SAVED path=/subghz/LabRAW_0001.sub"));serialCaptureContext=false;
+    fixture(868350000);CHECK(loadPreset("AM270",radio)&&describeRadio(radio,433920000,settings));profile=TxProfile::ReceiveOnly;powerIndex=2;
+    serialCaptureContext=serialCaptureHistoryContext=true;captureHistorySelection=1;captureHistorySavedMask=2;captureHistorySavedPathSlot=1;
+    std::strcpy(captureSavedPath,"/subghz/LabRAW_0002.sub");expectedHz=906400000;expectedProfile=TxProfile::ReceiveOnly;
+    const unsigned played=transmissions;playSavedCaptureHistory();CHECK(transmissions==played+1);
+    CHECK(settings.frequencyHz==433920000&&profile==TxProfile::ReceiveOnly&&powerIndex==2);
+    CHECK(openedInfo.frequencyHz==868350000&&!openedFileValid&&!waveformCount);
+    captureHistorySavedMask=0;playSavedCaptureHistory();CHECK(transmissions==played+1);captureHistorySavedMask=2;
+    captureHistorySavedPathSlot=0;playSavedCaptureHistory();CHECK(transmissions==played+1);captureHistorySavedPathSlot=1;
+    reopenSuccess=false;playSavedCaptureHistory();CHECK(transmissions==played+1&&!openedFileValid&&!waveformCount);reopenSuccess=true;
+    reopenDuration=5000001;playSavedCaptureHistory();CHECK(transmissions==played+1&&!openedFileValid&&!waveformCount);reopenDuration=600;
+    CHECK(settings.frequencyHz==433920000&&profile==TxProfile::ReceiveOnly&&powerIndex==2);
     std::printf("File send UI: %u checks passed (actual extracted flow, production codecs, mocked radio)\n",checks);
 }

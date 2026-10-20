@@ -16,6 +16,8 @@ bool serialChatCloseRequested=false,serialChatOpenPending=false;
 bool serialChatEditPending=false,serialChatEditing=false;
 bool serialCaptureContext=false,serialCaptureOpenPending=false,serialCaptureSavePending=false,serialCaptureCloseRequested=false;
 bool serialCaptureTraceRequested=false;
+bool serialCaptureHistoryContext=false;size_t captureHistorySelection;uint8_t captureHistorySavedMask;
+bool serialCapturePlayPending;int8_t captureHistorySavedPathSlot=-1;
 char captureSavedPath[112]="";
 ChatMode chatFormat=ChatMode::FlipperPlaintext;
 static LabSnapshot observed={};
@@ -75,10 +77,10 @@ bool labRawTraceCopy(size_t index,RawTraceEntry& output){CHECK(!observed.active&
 bool labRawTraceRelease(){CHECK(!observed.active);++traceReleases;traceInfo=RawTraceInfo{};traceEvents.clear();return true;}
 void labRequestStop(){++stops;observed.active=false;}
 bool labQueueText(const char* text,uint16_t destination){CHECK(std::strcmp(text,"TEST123")==0);++sends;sentDestination=destination;return true;}
-bool labStart(LabMode mode,const RegisterImage&,const RadioSettings& settings,TxProfile profile,uint8_t power,uint32_t step,ChatMode format,bool diagnostic,bool autoThreshold){
+bool labStart(LabMode mode,const RegisterImage&,const RadioSettings& settings,TxProfile profile,uint8_t power,uint32_t step,ChatMode format,bool diagnostic,bool autoThreshold,bool multiple){
     CHECK(mode==LabMode::Chat&&profile==TxProfile::ReceiveOnly&&power==0&&step==25000);
     CHECK(format==ChatMode::FlipperPlaintext&&diagnostic);CHECK(settings.rxTimeoutMs==30000);
-    CHECK(!autoThreshold);
+    CHECK(!autoThreshold&&!multiple);
     ++starts;startFrequency=settings.frequencyHz;startTimeout=settings.rxTimeoutMs;
     observed.active=!failStart;observed.chatDiagnostic=!failStart;return !failStart;
 }
@@ -221,5 +223,21 @@ int main(){
     traceInfo.count=1;traceCopyFailure=true;dumpCaptureTrace();CHECK(traceReleases==1&&traceCopies==3);traceCopyFailure=false;
     serialCaptureContext=true;inMenu=false;observed.active=true;traceInfo.count=0;dumpCaptureTrace();
     CHECK(!observed.active&&traceReleases==2&&sends==traceSends);serialCaptureContext=false;inMenu=true;
+    serialCaptureContext=serialCaptureHistoryContext=true;observed.captureHistoryCount=2;
+    observed.captureHistory[0].valid=observed.captureHistory[1].valid=true;
+    Serial.feed("capturesave 2\n");runPoll();CHECK(serialCaptureSavePending&&captureHistorySelection==1);serialCaptureSavePending=false;
+    const char* badSlots[]={"capturesave 0\n","capturesave 5\n","capturesave 3\n","capturesave 1x\n","capturesave  1\n","capturesave -1\n"};
+    for(const char* text:badSlots){Serial.feed(text);runPoll();CHECK(!serialCaptureSavePending&&captureHistorySelection==1);}
+    Serial.feed("capturesave\n");runPoll();CHECK(serialCaptureSavePending&&captureHistorySelection==1);serialCaptureSavePending=false;
+    serialCaptureHistoryContext=false;Serial.feed("capturesave 1\n");runPoll();CHECK(!serialCaptureSavePending);
+    Serial.feed("capturesave\n");runPoll();CHECK(serialCaptureSavePending);Serial.feed("captureclose\n");runPoll();CHECK(!serialCaptureSavePending&&serialCaptureCloseRequested);
+    serialCaptureCloseRequested=false;serialCaptureHistoryContext=true;captureHistorySelection=1;captureHistorySavedMask=2;captureHistorySavedPathSlot=1;
+    std::strcpy(captureSavedPath,"/subghz/LabRAW_0002.sub");
+    Serial.feed("captureplay\n");runPoll();CHECK(serialCapturePlayPending&&sends==traceSends);
+    Serial.feed("capturesave 1\n");runPoll();CHECK(!serialCaptureSavePending&&captureHistorySelection==1);
+    Serial.feed("captureclose\n");runPoll();CHECK(!serialCapturePlayPending&&serialCaptureCloseRequested);
+    serialCaptureCloseRequested=false;captureHistorySavedMask=0;Serial.feed("captureplay\n");runPoll();CHECK(!serialCapturePlayPending);
+    captureHistorySavedMask=2;captureHistorySavedPathSlot=0;Serial.feed("captureplay\n");runPoll();CHECK(!serialCapturePlayPending);
+    captureHistorySavedPathSlot=1;serialCaptureHistoryContext=false;Serial.feed("captureplay\n");runPoll();CHECK(!serialCapturePlayPending);
     std::printf("Radio serial controller: %u checks passed (actual extracted functions, UART/UI/worker doubles)\n",checks);
 }

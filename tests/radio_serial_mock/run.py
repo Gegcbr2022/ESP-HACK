@@ -26,7 +26,7 @@ def function(name):
             depth-=1
             if not depth:return source[match.start():opening+token.end()]
     raise RuntimeError("Unclosed production function: "+name)
-names=("currentChatPeer","simpleChatSend","runChatEditorPreview","serialRadioWorkerActive","serialChatMainIdle","serialChatCanSend","serialChatListenFrequency","startSerialChatListen","radioLabSerialPoll","radioLabHandlePending")
+names=("currentChatPeer","simpleChatSend","runChatEditorPreview","serialRadioWorkerActive","serialChatMainIdle","serialChatCanSend","serialChatListenFrequency","startSerialChatListen","requestCaptureSave","radioLabSerialPoll","radioLabHandlePending")
 controller="\n\n".join(function(name) for name in names)
 controller += "\n\n"+function("textEntry").replace("bool textEntry(","bool testedTextEntry(",1)
 controller += "\n\n"+function("printCaptureStatus").replace("void printCaptureStatus(","void testedPrintCaptureStatus(",1)
