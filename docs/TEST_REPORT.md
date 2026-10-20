@@ -1,6 +1,73 @@
-# Test report — v1.3-rf-lab.2
+# Test report — v1.3-rf-lab.3
 
-Recorded for the development branch on **2026-10-20**. These results distinguish
+Release 3 connected-device evidence was recorded on **2026-10-21** at runtime
+source **`9b93f08`**. The release 1 and release 2 build, native-test and hardware
+records below retain their original source pins; they are not relabeled as
+release 3 results.
+
+## Release 3: physical capture, SD reopen and RAW replay
+
+The normal four-slot auto-RSSI receive path completed its 64-sample baseline
+preparation and recorded no signals during the idle/noise precheck. The Flipper
+then transmitted two distinct synthetic Princeton codes, **A53A53** and
+**A53B53**, using ten repeats, TE 390 us and Guard_time 30. The ESP32 retained
+two distinct history slots with **445 and 451 signed RAW intervals**.
+
+Both selected slots were saved through the normal SD writer. Reopening the
+saved RAW data preserved the two distinct signals. A single explicit
+`captureplay` for saved slot 2 reopened its SD file and completed one bounded
+RAW transmission in **433,963 us**. The physical Flipper receiver decoded
+**A53B53**, reporting **four packets**. This is recorded-signal peer reception,
+not just a local TX-complete indication or a generated test waveform.
+
+Readback checks passed for the tested **45 CC1101 registers**, PA table and
+prior RX/IDLE state after playback. No crash occurred. This result covers the
+controlled OOK/Princeton pair and a complete recorded burst with repetitions;
+it does not establish arbitrary protocol support, rolling-code replay, range,
+calibrated RF power/timing, or Enhanced Chat GUI operation. Enhanced GUI RF
+remains unverified.
+
+## Release 3: repeated device regression checks
+
+The same `9b93f08` device image also passed controlled two-way plaintext chat:
+both Flipper CLI test messages reached the normal ESP32 chat UI with valid CRC,
+and the Flipper CLI received the ESP32's manually requested `TEST123`. The
+device-local +115 ppm correction persisted; the check completed without panic.
+This uses the internal-radio worker shared by Enhanced Chat, while its GUI
+remains untested.
+
+Nine of nine finite file-frequency/restoration checks passed across nominal
+906,400,000, 433,889,000 and 433,920,000 Hz. The fixed synthetic transmissions
+used six repeats; actual before/after FREQ bytes, MARC state and PA table were
+identical, including tested RX and IDLE restoration. These restore checks are
+separate from the physical peer decode of recorded RAW above.
+
+The actual OLED keyboard preview/cancel check passed with TX count unchanged
+at zero, no panic and return to the main menu. All eleven installed SD apps
+passed 120 diagnostic frames each, followed by Lua self-test PASS and return
+to the main menu on the ESP32 running at 240 MHz. These diagnostic app frames
+do not replace interactive testing of every game or utility workflow.
+
+## Release 3: native regression results
+
+These release 3 suite counts are recorded separately from the earlier release
+2 table below. They exercise production code with host adapters, not RF hardware.
+
+| Suite | Checks passed |
+|---|---:|
+| Lab limits / FilePlayback policy | 11,502 |
+| Physical RAW restoration guard, mocked radio | 4,756 |
+| Actual RAW ISR capture, mocked GPIO/clock | 14,838 |
+| Actual RAW worker, mocked task/radio | 566 |
+| Automatic RSSI / triggered capture policy | 5,561 |
+| Four-slot history model | 15,500 |
+| Actual four-slot history UI | 567 |
+| Actual editor / deferred UART controller | 2,508 |
+| Actual file save / replay controller | 329 |
+
+## Historical release 2 record
+
+The earlier release 2 record was made on **2026-10-20**. These results distinguish
 host tests, actual target compilation, and connected-device evidence. A passing
 mock does not establish RF sensitivity, pulse accuracy or physical interoperability.
 Release 1 artifact/device evidence is explicitly historical. The Russian

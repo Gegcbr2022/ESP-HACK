@@ -10,9 +10,26 @@
   RSSI. Advanced recording retains its manual threshold. Clean pretrigger
   recovery and edge timing fixes prevent stale noise and timing reconstruction
   from ending a later valid capture incorrectly.
+- Friendly reception now keeps up to four signals without overwriting them.
+  UP/DOWN selects an entry and OK saves that exact entry. Listening continues
+  until full, pause or exit; saving pauses reception while retaining the other
+  entries. New listening requires confirmed clearing; unsaved exit is protected.
 - Added bounded USB capture diagnostics that open the normal receive UI,
   save through its existing SD path, and reopen recorded RAW data for checking.
   These commands receive and inspect; opening them sends no RF signal.
+- Explicit `captureplay` reopens the last-saved selected RAW file from SD and
+  requests one finite playback; it never sends automatically. At runtime
+  `9b93f08`, two real Flipper Princeton bursts were captured as distinct
+  445/451-interval slots and saved. Replaying saved slot 2 took 433,963 us;
+  the physical Flipper decoded A53B53 in four packets. The tested 45 registers,
+  PA table and prior RX/IDLE state restored without a crash. Complete bursts
+  with repeats were used; arbitrary protocols and Enhanced Chat GUI RF remain
+  unverified. Earlier release 2 evidence below is preserved separately.
+- Repeated device checks at `9b93f08` passed controlled two-way chat through
+  the Flipper CLI, nine finite frequency/restoration checks across 906.400,
+  433.889 and 433.920 MHz, keyboard preview/cancel with TX count zero, and
+  120 diagnostic frames for each of eleven SD apps followed by Lua self-test
+  PASS and main-menu return. Enhanced Chat GUI remains untested.
 - Russian instructions: [file playback and recording](docs/FILE_PLAYBACK_RU.md).
   Hardware validation for this update is recorded in the test report.
 

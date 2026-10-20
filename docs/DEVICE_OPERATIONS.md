@@ -168,10 +168,52 @@ largest VM peak remained32,872/49,152 bytes; the longest observed callback in
 this run was4,592us. Boot reached the SH1106 main menu with SD mounted,
 120,280 free heap bytes, loaded115ppm and no radio SPI/ready timeouts.
 
+## Release 3: recorded history to SD and physical replay
+
+On **2026-10-21**, runtime source **`9b93f08`** passed a controlled
+Flipper-to-ESP32 recording and ESP32-to-Flipper RAW replay check. The same
+friendly four-slot auto-RSSI path completed 64 baseline samples; the idle/noise
+precheck left the history empty. Two synthetic Princeton bursts, **A53A53** and
+**A53B53**, were sent by the Flipper with ten repeats, TE 390 us and
+Guard_time 30. They produced separate slots of **445 / 451 RAW intervals**.
+
+Both slots were saved using the normal SD path and their recorded data was
+reopened. One manual `captureplay` for the last-saved selected slot 2 reopened
+that file and transmitted its RAW data once in **433,963 us**. The physical
+Flipper receiver decoded **A53B53** and reported **four packets**. Before/after
+checks confirmed the tested **45 CC1101 registers**, PA table and prior RX/IDLE
+state were restored. No crash occurred.
+
+The visible workflow selects with UP/DOWN and saves the selected entry with OK.
+It listens until four slots fill, a save pauses reception, or the user exits.
+Other entries remain available after saving. A new listening session requires
+an explicit clear confirmation; unsaved exit is protected. Complete RAW bursts
+including the necessary repeats were used here. This does not validate all
+protocols or dynamic-code replay. This test concerns OOK/RAW recording and
+playback, not Enhanced Chat GUI RF or the companion FAP. The actual OLED
+history screen is preserved in the [Russian capture guide](FILE_PLAYBACK_RU.md).
+
+Additional checks on this same release 3 image passed:
+
+- Controlled plaintext chat in both directions between the normal ESP32 UI
+  and the Flipper CLI, with valid received CRC and the ESP32's manual TEST123
+  received by the Flipper. Saved +115 ppm persisted; no panic occurred.
+- Nine of nine finite frequency/restoration checks across nominal
+  906,400,000 / 433,889,000 / 433,920,000 Hz, with six synthetic repeats and
+  identical actual before/after FREQ bytes, MARC state and PA table. Tested
+  RX/IDLE restoration passed.
+- Actual OLED keyboard preview/cancel with TX count zero, no panic and main
+  menu restored.
+- All eleven SD apps at 120 diagnostic frames each, then Lua self-test PASS
+  and main-menu return on the ESP32 at 240 MHz.
+
+These do not establish Enhanced Chat GUI RF or companion-FAP operation.
+Earlier release 2 evidence above remains historical and separate.
+
 ## Physical checks still needed
 
 Serial boot and register observations establish startup and bus access. They
 do not establish OLED appearance or all button workflows, RF waveform timing,
 receiver sensitivity, antenna matching, calibrated power, spectrum behavior,
-or RF behavior beyond the finite OOK and controlled plaintext tests above. Follow HARDWARE_VALIDATION.md
+or RF behavior beyond the finite OOK, recorded RAW and controlled plaintext tests above. Follow HARDWARE_VALIDATION.md
 with a known transmitter/receiver and measurement equipment for those checks.
