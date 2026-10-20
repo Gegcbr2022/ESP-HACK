@@ -9,7 +9,7 @@
 #include "menu/dsi_menu.h"
 #include "submenu/submenu.h"
 
-#define MENU_ITEM_COUNT 7
+#define MENU_ITEM_COUNT MAIN_MENU_ITEM_COUNT
 
 void returnToMainMenu();
 extern byte menu;

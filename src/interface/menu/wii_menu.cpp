@@ -5,10 +5,16 @@
 #include <cstring>
 
 static const char* const wiiMenuLabels[] = {
-  "WiFi", "BLE", "SubGHz", "Infrared", "GPIO", "Games", "Settings"
+  "WiFi", "BLE", "SubGHz", "Infrared", "GPIO", "Games", "Settings", "SD Apps"
 };
-static const int8_t wiiIconXOffsets[] = {0, 1, 0, 0, 0, 0, 0};
-static const int8_t wiiLabelXOffsets[] = {0, 0, 0, 0, 0, 0, 0};
+static const int8_t wiiIconXOffsets[] = {0, 1, 0, 0, 0, 0, 0, 0};
+static const int8_t wiiLabelXOffsets[] = {0, 0, 0, 0, 0, 0, 0, 0};
+static_assert(sizeof(wiiMenuLabels) / sizeof(wiiMenuLabels[0]) == MAIN_MENU_ITEM_COUNT,
+              "Every Wii menu item needs a label");
+static_assert(sizeof(wiiIconXOffsets) / sizeof(wiiIconXOffsets[0]) == MAIN_MENU_ITEM_COUNT,
+              "Every Wii menu item needs an icon offset");
+static_assert(sizeof(wiiLabelXOffsets) / sizeof(wiiLabelXOffsets[0]) == MAIN_MENU_ITEM_COUNT,
+              "Every Wii menu item needs a label offset");
 
 static U8G2_FOR_ADAFRUIT_GFX wiiText;
 static byte wiiAnimationFrames[MAIN_MENU_ITEM_COUNT] = {};

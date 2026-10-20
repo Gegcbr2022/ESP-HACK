@@ -130,13 +130,22 @@ static const MenuIcon subGhzIcon = {14, 14, 6, subFrames};
 static const MenuIcon rfidIcon = {14, 14, 4, rfidFrames};
 static const MenuIcon wifiIcon = {19, 16, 6, wifiFrames};
 static const MenuIcon bluetoothIcon = {16, 16, 2, bluetoothFrames};
+// Original SD-card/terminal glyph for this project, XBM (LSB first).
+static const uint8_t sdApps0[] PROGMEM = {
+  0x00,0x00,0xe0,0x0f,0x10,0x08,0x48,0x0d,0x04,0x08,0x14,0x08,0x24,0x08,
+  0x44,0x08,0x24,0x08,0x94,0x0b,0x04,0x08,0x04,0x08,0xfc,0x0f,0x00,0x00
+};
+static const uint8_t* const sdAppsFrames[] = {sdApps0};
+static const MenuIcon sdAppsIcon = {14, 14, 1, sdAppsFrames};
 const MenuIcon* const menuIcons[] = {
   &wifiIcon, &bluetoothIcon, &subGhzIcon, &infraredIcon,
-  &rfidIcon, &appsIcon, &settingsIcon
+  &rfidIcon, &appsIcon, &settingsIcon, &sdAppsIcon
 };
+static_assert(sizeof(menuIcons) / sizeof(menuIcons[0]) == MAIN_MENU_ITEM_COUNT,
+              "Every main menu item needs an icon");
 
 static U8G2_FOR_ADAFRUIT_GFX listText;
-static byte animationFrames[7] = {};
+static byte animationFrames[MAIN_MENU_ITEM_COUNT] = {};
 static byte activeItem = 0;
 static unsigned long animationTick = 0;
 static bool animationStarted = false;
@@ -215,8 +224,8 @@ static void drawLabel(DisplayType& display, byte item, int16_t y, bool primary) 
 
 static void renderListMenu(DisplayType& display, byte menuIndex, int16_t scrollbarY = -1) {
   display.clearDisplay();
-  const byte previous = (menuIndex + 6) % 7;
-  const byte next = (menuIndex + 1) % 7;
+  const byte previous = (menuIndex + MAIN_MENU_ITEM_COUNT - 1) % MAIN_MENU_ITEM_COUNT;
+  const byte next = (menuIndex + 1) % MAIN_MENU_ITEM_COUNT;
   drawIcon(display, previous, 4, 3);
   drawLabel(display, previous, 14, false);
   drawIcon(display, menuIndex, 4, 24);
@@ -224,7 +233,7 @@ static void renderListMenu(DisplayType& display, byte menuIndex, int16_t scrollb
   drawIcon(display, next, 4, 47);
   drawLabel(display, next, 58, false);
   drawFrame(display);
-  drawScrollbar(display, menuIndex, 7, scrollbarY);
+  drawScrollbar(display, menuIndex, MAIN_MENU_ITEM_COUNT, scrollbarY);
   display.display();
 }
 
@@ -244,10 +253,10 @@ void displayListMenu(DisplayType& display, byte menuIndex, int previousIndex) {
     animationFrames[activeItem] = (animationFrames[activeItem] + 1) % menuIcons[activeItem]->frameCount;
   }
 
-  if (previousIndex >= 0 && previousIndex < 7 && previousIndex != menuIndex) {
+  if (previousIndex >= 0 && previousIndex < MAIN_MENU_ITEM_COUNT && previousIndex != menuIndex) {
     const uint8_t steps = 8;
-    const int16_t startY = getScrollbarY(display, previousIndex, 7);
-    const int16_t endY = getScrollbarY(display, menuIndex, 7);
+    const int16_t startY = getScrollbarY(display, previousIndex, MAIN_MENU_ITEM_COUNT);
+    const int16_t endY = getScrollbarY(display, menuIndex, MAIN_MENU_ITEM_COUNT);
     for (uint8_t step = 1; step <= steps; ++step) {
       renderListMenu(
         display, menuIndex, interpolateMenuY(startY, endY, step, steps));
@@ -259,7 +268,7 @@ void displayListMenu(DisplayType& display, byte menuIndex, int previousIndex) {
 }
 
 void resetListMenuAnimation(byte menuIndex) {
-  if (menuIndex >= 7) return;
+  if (menuIndex >= MAIN_MENU_ITEM_COUNT) return;
   animationFrames[menuIndex] = 0;
   activeItem = menuIndex;
   animationTick = millis();

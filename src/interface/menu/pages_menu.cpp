@@ -1,8 +1,11 @@
 #include "../interface.h"
 #include "pages_menu.h"
 
-static constexpr int16_t MAIN_MENU_DOT_START_Y = 6;
-static constexpr int16_t MAIN_MENU_DOT_STEP_Y = 8;
+// Keep every 4px dot inside the 64px screen when an eighth item is added.
+static constexpr int16_t MAIN_MENU_DOT_MAX_STEP_Y = (SCREEN_HEIGHT - 4) / (MENU_ITEM_COUNT - 1);
+static constexpr int16_t MAIN_MENU_DOT_STEP_Y = MAIN_MENU_DOT_MAX_STEP_Y < 8 ? MAIN_MENU_DOT_MAX_STEP_Y : 8;
+static constexpr int16_t MAIN_MENU_DOT_START_Y =
+  (SCREEN_HEIGHT - 4 - (MENU_ITEM_COUNT - 1) * MAIN_MENU_DOT_STEP_Y) / 2;
 
 static void drawMainMenuDots(DisplayType& display) {
   for (byte i = 0; i < MENU_ITEM_COUNT; i++) {
@@ -68,6 +71,28 @@ static void drawMainMenuPage(DisplayType& display, byte menuIndex, int16_t yOffs
     display.setTextWrap(false);
     display.setCursor(46, 25 + yOffset);
     display.print("Config");
+  } else if (menuIndex == 7) {
+    // Original code-card illustration, drawn with primitives (no borrowed art).
+    const int16_t x = 8;
+    const int16_t y = 13 + yOffset;
+    display.drawLine(x + 10, y, x + 31, y, 1);
+    display.drawLine(x + 31, y, x + 31, y + 37, 1);
+    display.drawLine(x + 31, y + 37, x, y + 37, 1);
+    display.drawLine(x, y + 37, x, y + 10, 1);
+    display.drawLine(x, y + 10, x + 10, y, 1);
+    for (byte contact = 0; contact < 3; ++contact) {
+      display.fillRect(x + 13 + contact * 5, y + 4, 2, 5, 1);
+    }
+    display.drawLine(x + 8, y + 16, x + 14, y + 22, 1);
+    display.drawLine(x + 14, y + 22, x + 8, y + 28, 1);
+    display.drawFastHLine(x + 18, y + 28, 8, 1);
+    display.setTextColor(1);
+    display.setTextSize(2);
+    display.setTextWrap(false);
+    display.setCursor(65, 17 + yOffset);
+    display.print("SD");
+    display.setCursor(53, 35 + yOffset);
+    display.print("Apps");
   }
 }
 

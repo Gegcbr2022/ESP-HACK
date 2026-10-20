@@ -9,6 +9,8 @@
 #include "misc.h"
 #include "interface/interface.h"
 #include "subghz.h"
+#include "research/lab_suite.h"
+#include "research/lua_apps.h"
 #include "menu/wifi.h"
 #include "menu/bluetooth.h"
 #include "menu/infrared.h"
@@ -43,7 +45,9 @@ static bool sdSetupComplete = false;
 static unsigned long lastSDHealthCheckMs = 0;
 static bool sdInitDismissed = false;
 
-const char* menuItems[] = {"WiFi", "Bluetooth", "SubGHz", "Infrared", "GPIO", "Games", "Settings"};
+const char* menuItems[] = {"WiFi", "Bluetooth", "SubGHz", "Infrared", "GPIO", "Games", "Settings", "SD Apps"};
+static_assert(sizeof(menuItems) / sizeof(menuItems[0]) == MENU_ITEM_COUNT,
+              "Main menu labels must match the renderer item count");
 byte currentMenu = 0;
 bool inMenu = true;
 
@@ -113,6 +117,7 @@ static void createSDDirectories() {
 static void onSDCardReady() {
   if (sdSetupComplete) return;
   createSDDirectories();
+  ensureRadioLabFixture();
   loadConfig();
   ensureDefaultBootLogoFile();
   sdSetupComplete = true;
@@ -648,6 +653,7 @@ void setup() {
   loadAppearanceConfig();
   loadBootLogoConfig();
   applyColorScheme();
+  radioLabBootDiagnostics();
   if (!tryInitSDCard()) {
     ensureSDReadyInteractive(true);
   }
@@ -680,9 +686,11 @@ void setup() {
 
   OLED_printMenu(display, currentMenu);
   lastActivityTime = millis();
+  Serial.printf("[RadioLab] UI ready display=SH1106 SD=%s heap=%u\n",sdCardReady?"mounted":"unavailable",ESP.getFreeHeap());
 }
 
 void loop() {
+  if(inMenu)radioLabSerialPoll();
   static MenuButtonState upHeld;
   static MenuButtonState downHeld;
   buttonUp.tick();
@@ -756,6 +764,9 @@ void loop() {
       } else if (currentMenu == 6) {
         settingsMenuIndex = 0;
         displaySettingsMenu(display, settingsMenuIndex);
+      } else if (currentMenu == 7) {
+        runSdApps();
+        returnToMainMenu();
       }
     }
   } else {

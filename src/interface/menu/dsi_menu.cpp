@@ -11,7 +11,7 @@ static byte dsiAnimationFrames[MAIN_MENU_ITEM_COUNT] = {};
 static byte dsiActiveItem = 0;
 static unsigned long dsiAnimationTick = 0;
 static bool dsiAnimationStarted = false;
-static const int8_t dsiIconXOffsets[MAIN_MENU_ITEM_COUNT] = {-2, 0, 0, 0, 0, 0, 0};
+static const int8_t dsiIconXOffsets[MAIN_MENU_ITEM_COUNT] = {-2, 0, 0, 0, 0, 0, 0, 0};
 
 static void beginDsiText(DisplayType& display, const uint8_t* font, uint16_t color) {
   dsiText.begin(display);

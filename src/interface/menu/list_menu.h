@@ -3,7 +3,8 @@
 
 #include "display.h"
 
-static constexpr byte MAIN_MENU_ITEM_COUNT = 7;
+// Existing WiFi..Settings indices remain 0..6; SD Apps is appended at index 7.
+static constexpr byte MAIN_MENU_ITEM_COUNT = 8;
 
 struct MenuIcon {
   uint8_t width;
