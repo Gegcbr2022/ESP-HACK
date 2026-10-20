@@ -927,6 +927,23 @@ void radioLabSerialPoll() {
                 }
             }
             else if((serialChatContext||s.active)&&used)Serial.println("[Chat] busy: use chatstat, screen, chatsend TEST123, chatclose or chatstop");
+            else if(!strncmp(command,"sublist ",8)) {
+                const char* path=command+8;
+                if(!inMenu || (strcmp(path,"/subghz")&&!safePath(path)))Serial.println("[SDList] ERROR main menu and /subghz path required");
+                else {
+                    File folder=SD.open(path,FILE_READ);
+                    if(!folder || !folder.isDirectory())Serial.println("[SDList] ERROR directory unavailable");
+                    else {
+                        unsigned count=0;File entry=folder.openNextFile();
+                        while(entry && count<512) {
+                            Serial.printf("[SDList] %s %s\n",entry.isDirectory()?"DIR":"FILE",entry.name());
+                            entry.close();++count;if(!(count%16))delay(1);entry=folder.openNextFile();
+                        }
+                        Serial.printf("[SDList] count=%u more=%u\n",count,bool(entry));entry.close();
+                    }
+                    folder.close();
+                }
+            }
             else if(!strncmp(command,"subinspect ",11)) {
                 const char* path=command+11;
                 if(!inMenu||!safePath(path))Serial.println("[SUB] ERROR main menu and /subghz/ path required");
@@ -958,7 +975,7 @@ void radioLabSerialPoll() {
                     research::SubInfo known;known.kind=research::SubKind::Key;known.frequencyHz=433920000;
                     known.bits=24;known.teUs=390;known.keyBytes=8;known.key[5]=0xA5;known.key[6]=0x3A;known.key[7]=0x53;
                     snprintf(known.protocol,sizeof known.protocol,"Princeton");research::loadPreset("AM270",known.radio);
-                    research::StaticSubWaveform generated={};
+                    research::StaticSubWaveform generated={};waveformCount=0;
                     const auto encoded=research::encodeStaticSub(known,waveform,research::kWaveformCapacity,generated);
                     uint32_t elapsed=0;int32_t timing=0;bool sent=false;suspendLegacyReceive();
                     if(encoded==research::StaticSubError::None)sent=research::labTransmitRaw(waveform,generated.count,known.radio,known.frequencyHz,research::TxProfile::ShieldedLab,1,5000,elapsed,timing);
@@ -979,7 +996,7 @@ void radioLabSerialPoll() {
             else if(handleAppInstallCommand(command)){}
             else if(!strcmp(command,"rfdiag"))radioLabBootDiagnostics();
             else if(!strcmp(command,"appsdiag"))sdAppsSelfTest();
-            else if(used)Serial.println("[RadioLab] commands: chatopen, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868, chatstop, screen, rfdiag, rfclock, rflisten433, rftest princeton433, subinspect /subghz/file.sub, appsdiag, APP_PUT");
+            else if(used)Serial.println("[RadioLab] commands: chatopen, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868, chatstop, screen, rfdiag, rfclock, rflisten433, rftest princeton433, sublist /subghz, subinspect /subghz/file.sub, appsdiag, APP_PUT");
             used=0;overflow=false;
         } else if(!overflow&&c>=32&&c<=126&&used+1<sizeof(command))command[used++]=c;
         else overflow=true;
