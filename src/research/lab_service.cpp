@@ -6,6 +6,7 @@
 #include "trim_math.h"
 #include "chat_channel.h"
 #include "raw_radio_restore.h"
+#include "raw_startup_gate.h"
 #include "../CONFIG.h"
 #include "../../shared/chat_radio.h"
 #include "../../shared/chat_session.h"
@@ -328,16 +329,43 @@ void publishRaw(const TriggeredCapture& trigger, const raw_capture::Snapshot& co
     state.captureComplete = trigger.complete(); state.captureTailDiscarded = trigger.discardedTail();
     state.edgeCount = counters.edges; state.captureHighWater = counters.highWater;
     state.dropped = trigger.dropped(); state.rejected = trigger.rejected();
+    state.captureRearms=trigger.rearmCount();state.captureShortDiscarded=trigger.discardedShort();
+    state.captureArmingDropped=trigger.discardedArmingDropped();state.captureArmingRejected=trigger.discardedArmingRejected();
     portEXIT_CRITICAL(&lock);
 }
-void drainRaw(TriggeredCapture& trigger, uint32_t& edgeTime, bool finishing = false) {
-    int32_t pulse;
+void drainRaw(TriggeredCapture& trigger, bool finishing = false) {
+    int32_t pulse;uint32_t endedAtUs;
     for(size_t drained = 0; drained < raw_capture::kCapacity &&
-        (finishing || !stopRequested) && raw_capture::pop(pulse); ++drained) {
-        if(pulse && pulse != INT32_MIN)
-            edgeTime += pulse > 0 ? uint32_t(pulse) : uint32_t(-pulse);
-        trigger.pulse(pulse, edgeTime);
+        (finishing || !stopRequested) && raw_capture::pop(pulse,endedAtUs); ++drained) {
+        trigger.pulse(pulse, endedAtUs);
     }
+}
+bool prepareRawThreshold() {
+    if(!state.rawThresholdAuto)return true;
+    status("Sampling noise: wait before remote");
+    RawStartupGate gate(micros());
+    while(!stopRequested && !gate.ready() && !gate.failed()) {
+        const uint32_t nowUs=micros();
+        if(gate.due(nowUs)) {
+            const int16_t rssi=sampleRawRssi();
+            if(!ELECHOUSE_cc1101.spiReady()) {
+                errorCount(&LabSnapshot::spiErrors);status("SPI fault during RAW noise sample");return false;
+            }
+            gate.sample(rssi,micros());
+            portENTER_CRITICAL(&lock);state.rawThresholdSamples=gate.samples();portEXIT_CRITICAL(&lock);
+        }
+        if(!gate.ready() && !gate.failed())vTaskDelay(1);
+    }
+    if(stopRequested){status("RAW cancelled during noise sample");return false;}
+    if(!gate.ready()){status("RAW noise sample deadline");return false;}
+    activeSettings.rssiThresholdDbm=gate.thresholdDbm();
+    portENTER_CRITICAL(&lock);
+    state.rawThresholdDbm=gate.thresholdDbm();state.rawNoiseDbm=gate.noiseDbm();
+    state.rawThresholdSamples=gate.samples();state.rawThresholdReady=true;
+    state.carrier=state.rssiDbm>=state.rawThresholdDbm;
+    portEXIT_CRITICAL(&lock);
+    status("Armed: measured noise threshold");
+    return true;
 }
 bool transmitPacket(const uint8_t* data, size_t length) {
     if(length > 60 || !permitLabTx(activeProfile, activeSettings.frequencyHz, 100,
@@ -417,10 +445,11 @@ void worker(void*) {
     if(mode == LabMode::Explorer) loadPreset("AM270",activeImage);
     bool configured = configure(activeImage, activeSettings.frequencyHz);
     if(configured && mode == LabMode::Chat) status(diagnostic ? "Diagnostic RX-only30s; manual CRC" : "Chat RX ready");
+    if(configured && mode==LabMode::Raw)configured=prepareRawThreshold();
     if(configured && (mode == LabMode::Raw || mode == LabMode::Explorer))
         configured = raw_capture::start(CC1101_GDO0);
-    uint32_t rawEdgeTime = raw_capture::snapshot().lastEdgeUs;
-    TriggeredCapture rawTrigger(capture, kWaveformCapacity, activeSettings.rssiThresholdDbm, rawEdgeTime);
+    const uint32_t rawStartedUs = raw_capture::snapshot().startedUs;
+    TriggeredCapture rawTrigger(capture, kWaveformCapacity, activeSettings.rssiThresholdDbm, rawStartedUs);
     if(configured && mode == LabMode::Raw) status("Armed: waiting RSSI threshold");
     // Sample immediately on the first iteration; chat must never decide to TX
     // using the initial placeholder RSSI. Further samples remain 10ms apart.
@@ -442,7 +471,7 @@ void worker(void*) {
         if(mode == LabMode::Raw) {
             // Continuously drain noise into the bounded pretrigger window; it
             // cannot fill the2048-interval output bank before a real RSSI gate.
-            drainRaw(rawTrigger, rawEdgeTime);
+            drainRaw(rawTrigger);
             const auto s = raw_capture::snapshot();
             rawTrigger.integrity(s.dropped, s.rejected);
             if(now - lastSample >= 1) {
@@ -565,7 +594,7 @@ void worker(void*) {
     }
     raw_capture::stop();
     if(mode == LabMode::Raw) {
-        drainRaw(rawTrigger, rawEdgeTime, true);
+        drainRaw(rawTrigger, true);
         const auto finalCapture = raw_capture::snapshot();
         rawTrigger.integrity(finalCapture.dropped, finalCapture.rejected);
         rawTrigger.stop(micros()); publishRaw(rawTrigger, finalCapture);
@@ -578,7 +607,8 @@ void worker(void*) {
 }
 
 bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& settings,
-              TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz, ChatMode chatMode, bool chatDiagnostics) {
+              TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz, ChatMode chatMode, bool chatDiagnostics,
+              bool autoRawThreshold) {
     if(!labStop()) return false;
     if(mode==LabMode::Raw&&!capture) {
         capture=static_cast<int32_t*>(heap_caps_malloc(kWaveformCapacity*sizeof(int32_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
@@ -599,6 +629,9 @@ bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& set
     state.mode = transition(LabMode::Idle,event); state.active = true; state.rssiDbm = state.peakDbm = -127;
     state.chatMode = chatMode;
     state.chatDiagnostic = chatDiagnostics && mode == LabMode::Chat;
+    state.rawThresholdAuto=autoRawThreshold && mode==LabMode::Raw;
+    state.rawThresholdReady=mode==LabMode::Raw && !state.rawThresholdAuto;
+    state.rawThresholdDbm=settings.rssiThresholdDbm;state.rawNoiseDbm=-127;
     state.frequencyHz = settings.frequencyHz;
     state.txEnabled = !state.chatDiagnostic && permitLabTx(profile, settings.frequencyHz, 100, settings.txLimitMs);
     snprintf(state.txBlockReason, sizeof(state.txBlockReason), "%s", state.txEnabled ? "Ready: manual send" : "TX off: Radio Settings");

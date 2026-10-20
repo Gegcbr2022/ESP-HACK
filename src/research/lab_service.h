@@ -13,6 +13,10 @@ struct LabSnapshot {
     uint32_t frequencyHz, samples, packets, crcErrors, fifoErrors, spiErrors, timeouts, misoTimeouts;
     uint32_t pulseCount, dropped, edgeCount, rejected, captureHighWater, captureTailDiscarded;
     int16_t rssiDbm, peakDbm;
+    int16_t rawThresholdDbm, rawNoiseDbm;
+    uint8_t rawThresholdSamples;
+    bool rawThresholdReady, rawThresholdAuto;
+    uint32_t captureRearms, captureShortDiscarded, captureArmingDropped, captureArmingRejected;
     uint16_t sweepIndex, sweepPasses;
     int16_t sweep[kSweepBins], peakHold[kSweepBins];
     uint8_t registers[kRegisterCount];
@@ -36,7 +40,8 @@ struct LabSnapshot {
 // One radio worker owns every SPI transaction while active. No OLED or SD in it.
 bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& settings,
               TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz = 25000,
-              ChatMode chatMode = ChatMode::EspAck, bool chatDiagnostics = false);
+              ChatMode chatMode = ChatMode::EspAck, bool chatDiagnostics = false,
+              bool autoRawThreshold = false);
 bool labStop();
 void labRequestStop();
 LabSnapshot labSnapshot();

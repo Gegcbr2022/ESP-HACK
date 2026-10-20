@@ -10,6 +10,7 @@ namespace {
 
 static_assert((kCapacity & (kCapacity - 1)) == 0, "Ring must be a power of two");
 DRAM_ATTR int32_t intervals[kCapacity];
+DRAM_ATTR uint32_t endedAt[kCapacity];
 DRAM_ATTR uint16_t head = 0;
 DRAM_ATTR uint16_t tail = 0;
 DRAM_ATTR uint16_t used = 0;
@@ -34,6 +35,7 @@ void IRAM_ATTR edgeInterrupt(void*) {
         } else {
             intervals[head] = counters.lastLevel ? static_cast<int32_t>(duration)
                                                  : -static_cast<int32_t>(duration);
+            endedAt[head] = now;
             head = (head + 1U) & (kCapacity - 1U);
             ++used;
             ++counters.captured;
@@ -56,7 +58,7 @@ bool start(uint8_t pin) {
     counters = {};
     counters.pin = pin;
     counters.lastLevel = digitalRead(pin) ? 1 : 0;
-    counters.lastEdgeUs = micros();
+    counters.startedUs = counters.lastEdgeUs = micros();
     counters.running = true;
     portEXIT_CRITICAL(&captureMux);
     attachInterruptArg(pin, edgeInterrupt, nullptr, CHANGE);
@@ -73,10 +75,16 @@ void stop() {
 }
 
 bool pop(int32_t& durationUs) {
+    uint32_t ignored;
+    return pop(durationUs, ignored);
+}
+
+bool pop(int32_t& durationUs, uint32_t& endedAtUs) {
     portENTER_CRITICAL(&captureMux);
     const bool available = used != 0;
     if (available) {
         durationUs = intervals[tail];
+        endedAtUs = endedAt[tail];
         tail = (tail + 1U) & (kCapacity - 1U);
         --used;
     }

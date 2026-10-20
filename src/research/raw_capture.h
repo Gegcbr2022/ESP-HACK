@@ -20,12 +20,16 @@ struct Snapshot {
     uint32_t captured;
     uint32_t dropped;
     uint32_t rejected;
+    uint32_t startedUs;
     uint32_t lastEdgeUs;
 };
 
 bool start(uint8_t pin);
 void stop();
 bool pop(int32_t& durationUs);
+// Actual ISR ending timestamp; unlike summing intervals this survives rejected
+// or dropped edges and micros() wrap. Both fields are popped atomically.
+bool pop(int32_t& durationUs, uint32_t& endedAtUs);
 Snapshot snapshot();
 
 }  // namespace raw_capture
