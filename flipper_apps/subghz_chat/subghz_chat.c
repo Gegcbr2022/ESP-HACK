@@ -96,6 +96,8 @@ static int32_t radio_worker(void* context) {
     uint8_t configured_power = 255;
     uint32_t next_tx = 0, budget_started = now_ms();
     uint32_t airtime_used = 0;
+    uint32_t sync_since = 0;
+    bool sync_active = false;
     while(app->running) {
         lock(app);
         uint32_t frequency = app->frequency; uint8_t power = app->power;
@@ -107,7 +109,12 @@ static int32_t radio_worker(void* context) {
         bool notify = false;
         uint32_t now = now_ms();
         bool signal = furi_hal_gpio_read(furi_hal_subghz_get_data_gpio());
-        if(!signal && furi_hal_subghz_rx_pipe_not_empty()) {
+        if(signal && !sync_active) { sync_active = true; sync_since = now; }
+        else if(!signal) sync_active = false;
+        /* Recheck EOP after FIFO status: a packet can start between the first
+         * GPIO sample and the SPI status read. Never consume its partial FIFO. */
+        if(!signal && furi_hal_subghz_rx_pipe_not_empty() &&
+           !furi_hal_gpio_read(furi_hal_subghz_get_data_gpio())) {
             /* Official HAL can write up to64 bytes regardless of input size. */
             uint8_t scratch[64], size = 0;
             bool crc_ok = furi_hal_subghz_is_rx_data_crc_valid();
@@ -128,9 +135,11 @@ static int32_t radio_worker(void* context) {
             } else ++app->radio_errors;
             unlock(app);
             radio_rx(); receive_since = now;
-        } else if((uint32_t)(now - receive_since) >= 1000u) {
+        } else if(((uint32_t)(now - receive_since) >= 1000u &&
+                   !furi_hal_gpio_read(furi_hal_subghz_get_data_gpio())) ||
+                  (sync_active && (uint32_t)(now - sync_since) >= 200u)) {
             /* Bounds a stuck partial frame or RX overflow, including bad-CRC autoflush. */
-            radio_rx(); receive_since = now;
+            radio_rx(); receive_since = now; sync_active = false;
         }
         uint8_t wire[CHAT_MAX_FRAME];
         size_t size = 0;
