@@ -13,6 +13,8 @@ inline bool makeFlipperChatProfile(RegisterImage& image, RadioSettings& settings
     image.paPresent = true;
     if(!describeRadio(image, 433920000, settings, error)) return false;
     settings.txLimitMs = 1000;
+    // Host clear-channel gate; the hardware CS bit can assert on background noise.
+    settings.rssiThresholdDbm = -75;
     // An interactive chat runs until the user/serial close requests a stop.
     settings.rxTimeoutMs = 0;
     return true;

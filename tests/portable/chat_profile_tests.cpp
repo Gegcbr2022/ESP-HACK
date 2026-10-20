@@ -1,5 +1,6 @@
 #include "chat_profile.h"
 #include "lab_limits.h"
+#include "chat_channel.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -22,6 +23,19 @@ int main() {
     CHECK(std::fabs(settings.dataRateBaud-9992.5994873046875)<0.001);
     CHECK(std::fabs(settings.bandwidthHz-101562.5)<0.001);
     CHECK(settings.txLimitMs==1000&&settings.rxTimeoutMs==0);
+    CHECK(settings.rssiThresholdDbm==-75);
+    CHECK(!chatChannelBusy(-88,settings.rssiThresholdDbm,false));
+    CHECK(chatChannelBusy(-44,settings.rssiThresholdDbm,false));
+    CHECK(!chatChannelBusy(-76,-75,false));
+    CHECK(chatChannelBusy(-75,-75,false));
+    CHECK(chatChannelBusy(-74,-75,false));
+    // Exhaust every signed RSSI representation, including invalid/extreme
+    // samples. Sync must block regardless of received power or threshold.
+    static const int16_t thresholds[]={INT16_MIN,-120,-100,-85,-75,-40,0,INT16_MAX};
+    for(int32_t rssi=INT16_MIN;rssi<=INT16_MAX;++rssi)for(int16_t threshold:thresholds) {
+        CHECK(chatChannelBusy(int16_t(rssi),threshold,false)==(rssi>=threshold));
+        CHECK(chatChannelBusy(int16_t(rssi),threshold,true));
+    }
     CHECK(!permitLabTx(TxProfile::ReceiveOnly,settings.frequencyHz,100,settings.txLimitMs));
     // General settings require a finite deadline; only the interactive host
     // deliberately uses zero. Its worker does not call encodeRadioSettings.

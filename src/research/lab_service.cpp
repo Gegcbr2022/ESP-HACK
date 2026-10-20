@@ -4,6 +4,7 @@
 #include "packet_metadata.h"
 #include "radio_calibration.h"
 #include "trim_math.h"
+#include "chat_channel.h"
 #include "../CONFIG.h"
 #include "../../shared/chat_radio.h"
 #include "../../shared/chat_session.h"
@@ -321,7 +322,9 @@ void worker(void*) {
     uint32_t rawEdgeTime = raw_capture::snapshot().lastEdgeUs;
     TriggeredCapture rawTrigger(capture, kWaveformCapacity, activeSettings.rssiThresholdDbm, rawEdgeTime);
     if(configured && mode == LabMode::Raw) status("Armed: waiting RSSI threshold");
-    uint32_t lastSample = millis(), lastPreset = millis(), lastEdges = 0;
+    // Sample immediately on the first iteration; chat must never decide to TX
+    // using the initial placeholder RSSI. Further samples remain 10ms apart.
+    uint32_t lastSample = millis() - 10, lastPreset = millis(), lastEdges = 0;
     uint32_t lastRegisters = millis() - 1000;
     uint16_t bin = 0; uint8_t presetIndex = 0;
     uint32_t nextTx = millis(), rxStart = millis(), budgetStart = millis(), airtimeMs = 0;
@@ -424,7 +427,8 @@ void worker(void*) {
             // chunk before starting. Our own budget cannot split a line for60s.
             const uint32_t allowance = plaintext && plaintextTx.offset == 0 && plaintextTx.length ?
                 ((plaintextTx.length + FLIPPER_CHAT_PACKET - 1) / FLIPPER_CHAT_PACKET) * 100 : 100;
-            const bool carrierBusy = ELECHOUSE_cc1101.SpiReadStatus(0x38) & 0x40;
+            const bool carrierBusy = chatChannelBusy(state.rssiDbm, activeSettings.rssiThresholdDbm,
+                                                     digitalRead(CC1101_GDO0) == HIGH);
             const bool packetGap = int32_t(now - nextTx) < 0;
             const bool budgetBusy = airtimeMs + allowance > 1000;
             const bool busy = diagnostic || carrierBusy || packetGap || budgetBusy;
