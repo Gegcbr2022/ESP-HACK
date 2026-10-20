@@ -1,4 +1,4 @@
-# ESP-HACK Radio Lab — v1.3-rf-lab.2
+# ESP-HACK Radio Lab — v1.3-rf-lab.3
 
 An engineering fork of Teapot174/ESP-HACK, upstream commit
 `8c57584c6a39fc3ac948ce2277337a5dd2915baf`, for the existing ESP32 DevKit V1,
@@ -14,6 +14,9 @@ offers five styles: Страницы (Pages), Список (List), Wii, DSi and 
 category IDs and wiring remain unchanged; see [Pocket interface](docs/POCKET_UI.md).
 Open **Радио SubGHz** directly for the simple receive/files/chat/settings home;
 technical tools and the previous radio menu are under **Дополнительно**.
+File Send temporarily applies the file's exact supported frequency and restores
+the physical radio afterwards. Simple recording prepares its RSSI threshold
+from background noise; see the [Russian recording/file guide](docs/FILE_PLAYBACK_RU.md).
 Its independent radio task keeps
 display rendering and SD operations outside the GPIO edge ISR.
 
