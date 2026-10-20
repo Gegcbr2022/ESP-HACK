@@ -14,6 +14,19 @@ static unsigned checks;
 #define portEXIT_CRITICAL(x) ((void)(x))
 static int lock;
 static LabSnapshot state;
+static RawTraceEntry traceStorage[4096];
+static RawTraceEntry* rawTraceBank;
+static const size_t kRawTraceCapacity=4096;
+static RawTrace rawTrace;
+static void* workerHandle;
+static unsigned traceAllocations,traceFrees;
+static bool failTraceAllocation;
+static const int MALLOC_CAP_INTERNAL=1,MALLOC_CAP_8BIT=2;
+static void* heap_caps_malloc(size_t bytes,int caps) {
+    ++traceAllocations;CHECK(bytes==sizeof(traceStorage));CHECK(caps==(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    return failTraceAllocation?nullptr:traceStorage;
+}
+static void heap_caps_free(void* pointer){CHECK(pointer==traceStorage);++traceFrees;}
 static RadioSettings activeSettings;
 static size_t captured;
 static bool stopRequested;
@@ -54,6 +67,8 @@ static void reset(){
     captured=0;stopRequested=false;clockUs=0;rssiSamples=failSample=stopSample=0;
     delayUs=1000;noise=-88;edgeDuringRssi=edgeAfterTime=false;lastStatus.clear();ELECHOUSE_cc1101.ready=true;
     pending.clear();raw=raw_capture::Snapshot{};raw.running=true;
+    rawTraceBank=traceStorage;rawTrace.bind(traceStorage,kRawTraceCapacity);rawTrace.enable(true);
+    workerHandle=nullptr;traceAllocations=traceFrees=0;failTraceAllocation=false;
 }
 static void prepareTriggered(TriggeredCapture& trigger){
     // The initial interval is partial;20 actual intervals follow the gate.
@@ -85,6 +100,9 @@ int main(){
     CHECK(state.pulseCount==21&&!state.captureComplete);
     CHECK(state.captureQualifiedPulses==21&&state.captureRssiQualified);
     clockUs=20000;CHECK(!rawCaptureTick(duringSpi,lastSample,20));CHECK(duringSpi.complete()&&state.captureComplete);
+    CHECK(labRawTraceInfo().frozen&&labRawTraceInfo().started&&labRawTraceInfo().count>0);
+    RawTraceEntry entry{};CHECK(labRawTraceCopy(labRawTraceInfo().count-1,entry));
+    CHECK(entry.phase==unsigned(TriggeredCapture::Phase::Complete)&&entry.rssiQualified&&entry.post==21);
 
     // An ISR between the second drain and atomic snapshot leaves queued data;
     // defer quiet polling to the next tick, even when the old edge was7ms ago.
@@ -124,6 +142,22 @@ int main(){
     clockUs=4000;noise=-60;lastSample=0;CHECK(rawCaptureTick(contextOnly,lastSample,4));
     CHECK(state.pulseCount==64&&state.captureQualifiedPulses==0);
     contextOnly.stop(4200);CHECK(!contextOnly.complete());
+
+    // Debug allocation is optional/idle-only. Disable preserves immutable
+    // evidence; explicit release returns49KiB before history/Lua operations.
+    reset();CHECK(labRawTraceRelease()&&traceFrees==1);CHECK(!rawTraceBank);
+    failTraceAllocation=true;CHECK(!labRawTraceEnable(true));CHECK(!labRawTraceInfo().enabled);
+    failTraceAllocation=false;CHECK(labRawTraceEnable(true)&&traceAllocations==2);
+    workerHandle=traceStorage;CHECK(!labRawTraceEnable(false)&&!labRawTraceRelease());workerHandle=nullptr;
+    CHECK(labRawTraceInfo().enabled&&!labRawTraceInfo().frozen);
+    for(unsigned i=0;i<5001;++i)rawTrace.record(1,i,int32_t(i),1,2048,2048,true,i>500);
+    CHECK(labRawTraceInfo().count==4096&&labRawTraceInfo().dropped==905&&labRawTraceInfo().started);
+    CHECK(!labRawTraceCopy(0,entry));CHECK(labRawTraceEnable(false));
+    CHECK(labRawTraceCopy(0,entry)&&entry.value==905&&entry.atUs==905&&entry.used==2048&&entry.post==2048);
+    CHECK(labRawTraceCopy(4095,entry)&&entry.value==5000);CHECK(!labRawTraceCopy(4096,entry));
+    rawTrace.record(1,6000,6000,1,1,1,false,true);CHECK(labRawTraceCopy(4095,entry)&&entry.value==5000);
+    CHECK(labRawTraceEnable(true));CHECK(labRawTraceInfo().count==0&&!labRawTraceInfo().frozen);
+    CHECK(labRawTraceRelease()&&traceFrees==2&&!labRawTraceCopy(0,entry));
 
     std::printf("RAW worker: %u checks passed (real startup/drain/tick/publish, SPI-overlap IRQ and policy doubles)\n",checks);
 }

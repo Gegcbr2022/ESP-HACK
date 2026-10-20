@@ -14,7 +14,7 @@ compiler=args.compiler or shutil.which('g++') or shutil.which('clang++') or shut
 if not compiler:parser.error('Use --compiler with a native C++ compiler')
 source=(root/'src/research/lab_service.cpp').read_text(encoding='utf-8')
 def function(name):
-    match=re.search(r'^(?:void|bool) '+name+r'\([^\n]*\) \{',source,re.M)
+    match=re.search(r'^(?:void|bool|RawTraceInfo) '+name+r'\([^\n]*\) \{',source,re.M)
     if not match:raise RuntimeError('Production function absent: '+name)
     opening=source.index('{',match.start());depth=0
     for token in re.finditer(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/|[{}]',source[opening:],re.S):
@@ -23,7 +23,9 @@ def function(name):
             depth-=1
             if not depth:return source[match.start():opening+token.end()]
     raise RuntimeError('Unclosed function '+name)
-production='\n\n'.join(function(name) for name in ('publishRaw','drainRaw','rawCaptureTick','prepareRawThreshold'))
+production='\n\n'.join(function(name) for name in ('traceRaw','freezeRawTrace','publishRaw','drainRaw','rawCaptureTick','prepareRawThreshold',
+    'labRawTraceEnable','labRawTraceInfo','labRawTraceCopy','labRawTraceRelease'))
+production='namespace research {\n'+production+'\n}\n'
 template=(root/'tests/raw_worker_mock/worker_test.cpp').read_text(encoding='utf-8')
 with tempfile.TemporaryDirectory(prefix='esp-raw-worker-') as directory:
     build=Path(directory);generated=build/'worker.cpp';generated.write_text(template.replace('// PRODUCTION_FUNCTIONS',production),encoding='utf-8')

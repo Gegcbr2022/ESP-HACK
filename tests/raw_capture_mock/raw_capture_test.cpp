@@ -121,12 +121,15 @@ int main() {
     // Same-level/spurious callbacks and unrepresentable intervals are visible.
     edge(100, high);
     CHECK(snapshot().rejected == 1);
+    CHECK(snapshot().lastRejectedCause==1&&snapshot().lastRejectedUs==nowUs);
     high = !high;
     edge(0, high);
     CHECK(snapshot().rejected == 2);
+    CHECK(snapshot().lastRejectedCause==2&&snapshot().lastRejectedUs==nowUs);
     high = !high;
     edge(0x80000000U, high);
     CHECK(snapshot().rejected == 3 && !pop(duration));
+    CHECK(snapshot().lastRejectedCause==3&&snapshot().lastRejectedUs==nowUs);
 
     // Direct access to GPIO32..39 uses the second hardware input bank.
     stop();
