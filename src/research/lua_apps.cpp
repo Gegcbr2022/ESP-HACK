@@ -10,7 +10,7 @@
 namespace {
 using research::LuaSandbox;
 struct Runtime {
-    bool quit, ownsRadio, changedRadio;
+    bool quit, ownsRadio, changedRadio, diagnostic;
     uint32_t radioFrequency, lastRadioChange;
     unsigned drawCalls;
     char radioPreset[12];
@@ -68,6 +68,7 @@ int radioResult(lua_State* state, bool success, const char* message) {
 }
 int radioStart(lua_State* state) {
     if(!activeApp) return radioResult(state, false, "no active app");
+    if(activeApp->diagnostic) return radioResult(state, false, "radio start disabled during self-test");
     const lua_Integer requested = luaL_checkinteger(state, 1);
     if(requested < 300000000 || requested > 928000000 || !research::supportedFrequency(uint32_t(requested)))
         return radioResult(state, false, "outside CC1101 hardware bands");
@@ -162,6 +163,29 @@ void stopOwnedRadio(Runtime& runtime) {
     research::labRequestStop();
     while(!research::labStop()) { Serial.println("[Lua] Waiting for RX worker stop"); delay(10); }
 }
+void sampleSelfTest(const char* name, void* bank) {
+    char path[48]; snprintf(path, sizeof(path), "/apps/%s", name);
+    File file = SD.open(path, FILE_READ);
+    if(!file) { Serial.printf("[Lua] SAMPLE name=%s result=MISSING\n", name); return; }
+    const size_t length = file.size();
+    if(!length || length > LuaSandbox::kSourceBytes) {
+        file.close(); Serial.printf("[Lua] SAMPLE name=%s result=FAIL reason=source-size\n", name); return;
+    }
+    char* source = static_cast<char*>(heap_caps_malloc(length + 1, MALLOC_CAP_8BIT));
+    if(!source) { file.close(); Serial.printf("[Lua] SAMPLE name=%s result=FAIL reason=source-memory\n", name); return; }
+    const size_t read = file.read(reinterpret_cast<uint8_t*>(source), length); file.close(); source[length] = 0;
+    Runtime runtime = {}; runtime.diagnostic = true; activeApp = &runtime;
+    LuaSandbox vm(bank, LuaSandbox::kHeapBytes, clockUs);
+    bool good = read == length && vm.open(installBindings) && vm.load(source, length, path);
+    free(source);
+    if(good) { runtime.drawCalls = 0; good = vm.tick(33); }
+    if(good) { runtime.drawCalls = 0; good = vm.draw(); }
+    if(good) display.display();
+    Serial.printf("[Lua] SAMPLE name=%s result=%s peak=%u/%u%s%s\n", name, good ? "PASS" : "FAIL",
+                  unsigned(vm.peak()), unsigned(LuaSandbox::kHeapBytes), good ? "" : " reason=",
+                  good ? "" : (read != length ? "incomplete-read" : vm.error()));
+    vm.close(); activeApp = nullptr; stopOwnedRadio(runtime);
+}
 void launch(const char* name) {
     if(!validName(name)) return;
     char path[48]; snprintf(path, sizeof(path), "/apps/%s", name);
@@ -244,7 +268,7 @@ void sdAppsSelfTest() {
     if(activeApp) { Serial.println("[Lua] SELFTEST busy"); return; }
     void* bank = heap_caps_malloc(LuaSandbox::kHeapBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     if(!bank) { Serial.println("[Lua] SELFTEST FAIL heap allocation"); return; }
-    Runtime runtime = {}; activeApp = &runtime;
+    Runtime runtime = {}; runtime.diagnostic = true; activeApp = &runtime;
     LuaSandbox vm(bank, LuaSandbox::kHeapBytes, clockUs);
     const char smoke[] = "app={draw=function() ui.clear();ui.text(0,0,'Lua SDK self-test');ui.line(0,12,127,12) end,tick=function(dt) assert(dt==33) end}";
     const bool smokeGood = vm.open(installBindings) && vm.load(smoke, sizeof(smoke)-1, "selftest") && vm.tick(33) && vm.draw();
@@ -254,5 +278,8 @@ void sdAppsSelfTest() {
     Serial.printf("[Lua] SELFTEST %s version=%s peak=%u/%u instructionQuota=%lu wallUs=%lu\n",
                   smokeGood && quotaGood ? "PASS" : "FAIL", LUA_RELEASE, unsigned(vm.peak()),
                   unsigned(LuaSandbox::kHeapBytes), static_cast<unsigned long>(LuaSandbox::kInstructions), static_cast<unsigned long>(LuaSandbox::kWallUs));
-    vm.close(); activeApp = nullptr; stopOwnedRadio(runtime); free(bank);
+    vm.close(); activeApp = nullptr; stopOwnedRadio(runtime);
+    const char* samples[] = {"hello.lua", "stopwatch.lua", "rf_dashboard.lua"};
+    for(size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) sampleSelfTest(samples[i], bank);
+    free(bank);
 }

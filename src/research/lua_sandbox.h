@@ -171,7 +171,8 @@ private:
         return true;
     }
     bool captureError() {
-        const char* message = lua_tostring(state_, -1);
+        // Numeric conversion can allocate; error extraction is outside lua_pcall.
+        const char* message = lua_type(state_, -1) == LUA_TSTRING ? lua_tolstring(state_, -1, nullptr) : nullptr;
         setError(message ? message : "Lua failed without an error string"); lua_pop(state_, 1); return false;
     }
     void setError(const char* text) { snprintf(error_, sizeof(error_), "%.127s", text); }
