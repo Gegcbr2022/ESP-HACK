@@ -106,6 +106,40 @@ static void textTests(const char* directory) {
   display.clearDisplay();for(unsigned row=0;row<4;++row)ui_text::draw(display,0,row*16,alphabet[row]);
   char path[1024];snprintf(path,sizeof path,"%s/russian_alphabet.pgm",directory);CHECK(display.writePgm(path));
 }
+static void basicMenuTests(const char* directory) {
+  const char* source[]={"Interface","Restart","Reset","Update","About","Menu","Submenu","Color","Standby","Boot Logo","Pages","List","White","Black","Disable","15s","1m","Back","SD Apps","Read","Read RAW","Send","Analyzer","Radio Lab","Chat"};
+  const char* russian[]={"Интерфейс","Перезапуск","Сброс настроек","Обновление","О программе","Главное меню","Подменю","Цвет экрана","Таймер экрана","Логотип запуска","Страницы","Список","Белый","Чёрный","Выключено","15 сек","1 мин","Назад","Приложения SD","Чтение","Запись RAW","Передача файла","Анализатор","Радио","Чат"};
+  CHECK(sizeof source==sizeof russian);
+  for(unsigned i=0;i<sizeof source/sizeof source[0];++i) {
+    CHECK(!strcmp(ui_menu::label(source[i]),russian[i]));size_t glyphs=0;
+    CHECK(ui_text::validate(ui_menu::label(source[i]),strlen(ui_menu::label(source[i])),&glyphs));
+    CHECK(glyphs>0&&glyphs<=19);
+  }
+  const char* identifiers[]={"FuriHalSubGhzPresetOok650Async","CAME","Princeton","/subghz/Read.sub","Wii","DSi","Pocket","Jammer","Brute"};
+  for(const char* identifier:identifiers)CHECK(ui_menu::label(identifier)==identifier);
+  CHECK(!strcmp(ui_menu::label(nullptr),""));
+  DisplayType display;
+  const char* settings[]={"Interface","Restart","Reset","Update","About"};
+  const char* appearance[]={"Menu","Submenu","Color","Standby","Boot Logo"};
+  for(submenu=0;submenu<2;++submenu)for(unsigned i=0;i<5;++i) {
+    displaySubmenu(display,settings,5,i);CHECK(display.clipped==0);
+    displaySubmenu(display,appearance,5,i,(i+4)%5);CHECK(display.clipped==0);
+  }
+  // Real submenu renderers must draw Cyrillic Ч, not UTF-8 bytes or '?'.
+  submenu=1;displaySubmenu(display,subghzMenuItems,SUBGHZ_MENU_ITEM_COUNT,0);
+  CHECK(!display.pixels[4][6]&&display.pixels[4][8]&&!display.pixels[4][10]);
+  CHECK(display.pixels[7][6]&&!display.pixels[7][7]&&!display.pixels[7][10]);
+  submenu=0;displaySubmenu(display,subghzMenuItems,SUBGHZ_MENU_ITEM_COUNT,0);
+  CHECK(display.pixels[25][28]&&!display.pixels[25][32]&&display.pixels[25][36]);
+  CHECK(!display.pixels[31][28]&&display.pixels[31][30]&&display.pixels[31][36]);
+  char path[1024];
+  for(submenu=0;submenu<2;++submenu) {
+    displaySubmenu(display,settings,5,0);
+    snprintf(path,sizeof path,"%s/settings_%u.pgm",directory,unsigned(submenu));CHECK(display.writePgm(path));
+    displaySubmenu(display,appearance,5,4);
+    snprintf(path,sizeof path,"%s/interface_%u.pgm",directory,unsigned(submenu));CHECK(display.writePgm(path));
+  }
+}
 static void renderTests(const char* directory) {
   DisplayType display;
   for(unsigned raw=0;raw<256;++raw)for(unsigned sd=0;sd<2;++sd) {
@@ -133,7 +167,7 @@ static void renderTests(const char* directory) {
   for(submenu=0;submenu<2;++submenu)for(uint8_t item=0;item<SUBGHZ_MENU_ITEM_COUNT;++item) {
     const unsigned before=display.frames;
     displaySubmenu(display,subghzMenuItems,SUBGHZ_MENU_ITEM_COUNT,item);
-    CHECK(display.frames>before);CHECK(hasLabel(display,subghzMenuItems[item]));
+    CHECK(display.frames>before);CHECK(display.clipped==0);
   }
   for(byte item=0;item<8;++item) {
     char path[1024];snprintf(path,sizeof path,"%s/pocket_%u.pgm",directory,unsigned(item));
@@ -146,6 +180,6 @@ static void renderTests(const char* directory) {
 }
 int main(int argc,char** argv) {
   if(argc!=2){fprintf(stderr,"Pass a snapshot directory\n");return 2;}
-  appearanceTests();navigationTests();textTests(argv[1]);renderTests(argv[1]);
-  printf("Pocket UI: %u checks PASS (Russian glyph pixels/UTF8, all8 categories/all5 styles, bounds, navigation, migration); 10 PGM snapshots\n",checks);
+  appearanceTests();navigationTests();textTests(argv[1]);basicMenuTests(argv[1]);renderTests(argv[1]);
+  printf("Pocket UI: %u checks PASS (Russian glyph pixels/UTF8, settings/submenu labels, all8 categories/all5 styles, bounds, navigation, migration); 14 PGM snapshots\n",checks);
 }

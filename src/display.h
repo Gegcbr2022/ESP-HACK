@@ -4,6 +4,8 @@
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
 #include "CONFIG.h"
+#include "interface/utf8_text.h"
+#include "interface/menu_labels.h"
 
 #define DISPLAY_SH1106 0
 #define DISPLAY_SSD1306 1
@@ -28,14 +30,23 @@
   #error "ERROR. Use DISPLAY_SH1106 or DISPLAY_SSD1306."
 #endif
 
-inline void drawCenteredMenuLabel(DisplayType &display, const char *text, uint8_t textSize, int16_t y) {
-  int16_t x1, y1;
-  uint16_t w, h;
+// ui_text.h includes DisplayType from this header. This full declaration avoids
+// a circular include while keeping default arguments in ui_text.h only.
+namespace ui_text {
+void draw(DisplayType&, int16_t, int16_t, const char*, uint16_t, size_t, uint8_t);
+}
 
+inline void drawCenteredMenuLabel(DisplayType &display, const char *text, uint8_t textSize, int16_t y) {
+  text = ui_menu::label(text);
+  size_t glyphs = 0;
+  ui_text::validate(text, strlen(text), &glyphs);
+  // Keep the complete label readable where a 2x selection would exceed width.
+  if (textSize != 2 || glyphs > 10) textSize = 1;
+  const size_t limit = textSize == 2 ? 10 : 20;
+  if (glyphs > limit) glyphs = limit;
+  const int16_t x = (SCREEN_WIDTH - glyphs * 6 * textSize) / 2;
   display.setTextSize(textSize);
-  display.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-  display.setCursor((SCREEN_WIDTH - w) / 2, y);
-  display.print(text);
+  ui_text::draw(display, x, y, text, SH110X_WHITE, limit, textSize);
 }
 
 inline void drawRollingMenuLabel(DisplayType &display, const char *text, int16_t y, uint8_t textSize = 1) {

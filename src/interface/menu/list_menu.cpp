@@ -1,4 +1,5 @@
 #include "list_menu.h"
+#include "../ui_text.h"
 
 #include <U8g2_for_Adafruit_GFX.h>
 
@@ -294,8 +295,8 @@ static void renderListSubmenu(DisplayType& display, const char* const items[],
     } else {
       listText.setForegroundColor(SH110X_WHITE);
     }
-    listText.setCursor(6, y + 12);
-    listText.print(items[position]);
+    ui_text::draw(display, 6, y + 4, ui_menu::label(items[position]),
+                  position == menuIndex ? SH110X_BLACK : SH110X_WHITE, 19, 1);
   }
   drawScrollbar(display, menuIndex, itemCount, scrollbarY);
   display.display();
