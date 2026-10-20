@@ -65,5 +65,9 @@ struct BruteProtocol {
 };
 
 void runSubGHz();
+// Release the legacy decoder/capture IRQ before another radio application owns
+// GDO0. Restore explicitly when returning to the legacy SubGHz application.
+void suspendLegacyReceive();
+void restoreReceiveMode();
 
 #endif

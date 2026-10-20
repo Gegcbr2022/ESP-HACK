@@ -7,6 +7,7 @@
 #include <SPI.h>
 #include <RCSwitch.h>
 #include <math.h>
+#include "research/raw_capture.h"
 
 // CC1101
 #define DEFAULT_RF_FREQUENCY 433.92 // MHz
@@ -18,7 +19,6 @@ int freqIndex = 1; // Default 433.92 MHz
 // RCSwitch
 RCSwitch rcswitch = RCSwitch();
 
-#define MAX_DATA_LOG 512
 
 byte menuIndex = 0;
 bool validKeyReceived = false;
@@ -200,10 +200,20 @@ int rawRecorderEdgeCount = 0;
 int rawRecorderPrevLevel = LOW;
 unsigned long rawRecorderPrevEdgeUs = 0;
 unsigned long rawRecorderLastEdgeUs = 0;
+float rawRecorderPeakRssi = -127.0f;
+unsigned long rawRecorderRssiSampleUs = 0;
+bool rawRecorderFrameDamaged = false;
+bool rawRecorderStorageFailed = false;
+uint32_t rawRecorderSeenLosses = 0;
+uint32_t rawRecorderRejectedFrames = 0;
+uint32_t cc1101StateTimeouts = 0;
+uint32_t cc1101ReadbackErrors = 0;
+uint32_t cc1101FifoRecoveries = 0;
 
 bool setupCC1101();
 void configureCC1101();
 void restoreReceiveMode();
+static void disableRcSwitchReceive();
 void read_rcswitch(tpKeyData* kd);
 void read_raw(tpKeyData* kd);
 void OLED_printWaitingSignal();
@@ -222,7 +232,7 @@ bool saveKeyToSD(tpKeyData* kd);
 String allocateNextSignalFileName();
 bool startRawRecorderSession();
 void stopRawRecorderSession(bool flushPending = true, bool discardFile = false);
-bool saveRawFrameToSession(const String& rawData, float rssi);
+bool saveRawFrameToSession();
 void flushRawRecorderFrame();
 void handleRawRecorderCapture();
 bool loadKeyFromSD(String fileName, tpKeyData* kd);
@@ -293,8 +303,7 @@ static bool ensureCC1101Initialized() {
   prepareCC1101Pins();
   if (cc1101Initialized && cc1101IsConnected()) return true;
 
-  ELECHOUSE_cc1101.SpiStrobe(0x30);
-  delayMicroseconds(100);
+  // Init owns the reset sequence and initializes SPI before accessing it.
   ELECHOUSE_cc1101.Init();
   cc1101Initialized = cc1101IsConnected();
   return cc1101Initialized;
@@ -304,6 +313,9 @@ bool initRfModule(String mode, float freq) {
   if (!ensureCC1101Initialized()) {
     return false;
   }
+  research::raw_capture::stop();
+  disableRcSwitchReceive();
+  ELECHOUSE_cc1101.SpiStrobe(CC1101_SIDLE);
   ELECHOUSE_cc1101.setMHZ(freq);
   ELECHOUSE_cc1101.setModulation(2);
   if (mode == "tx" || mode == "TX") {
@@ -314,19 +326,22 @@ bool initRfModule(String mode, float freq) {
     pinMode(cc1101GDO0Pin, OUTPUT);
     digitalWrite(cc1101GDO0Pin, LOW);
   } else {
-    ELECHOUSE_cc1101.setPktFormat(0);
+    ELECHOUSE_cc1101.setPktFormat(3);
+    ELECHOUSE_cc1101.setSyncMode(0);
+    ELECHOUSE_cc1101.setCrc(0);
+    ELECHOUSE_cc1101.SpiWriteReg(CC1101_IOCFG0, 0x0D);
+    pinMode(cc1101GDO0Pin, INPUT);
     ELECHOUSE_cc1101.SetRx();
   }
-  ELECHOUSE_cc1101.SpiStrobe(0x33);
-  delayMicroseconds(100);
+  // MCSM0 enables automatic calibration on IDLE -> RX/TX; SCAL is
+  // only valid in IDLE, never issue it after SetRx()/SetTx().
   return true;
 }
 
 void deinitRfModule() {
-  ELECHOUSE_cc1101.SpiStrobe(0x36);
-  ELECHOUSE_cc1101.SetRx();
-  pinMode(cc1101GDO0Pin, OUTPUT);
-  digitalWrite(cc1101GDO0Pin, LOW);
+  // Release the MCU output before the radio can drive asynchronous RX data.
+  ELECHOUSE_cc1101.SpiStrobe(CC1101_SIDLE);
+  pinMode(cc1101GDO0Pin, INPUT);
 }
 
 static void enableRcSwitchReceive() {
@@ -355,6 +370,11 @@ static void disableRcSwitchReceive() {
   Serial.println(F("[RCSwitch] RX disabled"));
 }
 
+void suspendLegacyReceive() {
+  disableRcSwitchReceive();
+  research::raw_capture::stop();
+}
+
 void runSubGHz() {
   if (!setupCC1101()) {
     Serial.println(F("Failed to initialize CC1101"));
@@ -369,6 +389,9 @@ void runSubGHz() {
   OLED_printSubGHzMenu(display, menuIndex);
 
   while (true) {
+    // GPIO capture/decoding runs in interrupts; give the idle task a turn even
+    // while the user stays on a static menu or stopped-recording screen.
+    delay(1);
     static MenuButtonState upHeld;
     static MenuButtonState downHeld;
     buttonUp.tick();
@@ -412,6 +435,7 @@ void runSubGHz() {
             continue;
           }
           menuState = menuRawRecorder;
+          disableRcSwitchReceive();
           setupCC1101();
           rawRecorderRunning = false;
           rawRecorderStopped = false;
@@ -509,9 +533,11 @@ void runSubGHz() {
         Serial.println(F(" Signal:"));
         if (!readRAW) read_rcswitch(&keyData1);
         else read_raw(&keyData1);
-        if (validKeyReceived && autoSave && (lastSavedKey != keyData1.keyID[0] || keyData1.keyID[0] == 0)) {
+        uint64_t receivedKey = 0;
+        for (byte i = 0; i < 8; ++i) receivedKey = (receivedKey << 8) | keyData1.keyID[i];
+        if (validKeyReceived && autoSave && lastSavedKey != receivedKey) {
           if (saveKeyToSD(&keyData1)) {
-            lastSavedKey = keyData1.keyID[0];
+            lastSavedKey = receivedKey;
             validKeyReceived = false;
             signals = 0;
             memset(&keyData1, 0, sizeof(tpKeyData));
@@ -621,8 +647,8 @@ void runSubGHz() {
           String stoppedFile = rawRecorderSessionFile;
           stopRawRecorderSession(true, false);
           rawRecorderRunning = false;
-          rawRecorderStopped = true;
-          rawRecorderStoppedFile = stoppedFile;
+          rawRecorderStopped = !rawRecorderStorageFailed && rawRecorderSavedCount != 0;
+          rawRecorderStoppedFile = rawRecorderStopped ? stoppedFile : "";
         }
         rawRecorderLastDraw = 0;
         OLED_printRawRecorder();
@@ -870,122 +896,115 @@ void resetButtonStates() {
   buttonBack.resetStates();
 }
 
+static bool waitCC1101State(byte expected, uint32_t timeoutMs = 20) {
+  const uint32_t started = millis();
+  do {
+    if ((ELECHOUSE_cc1101.SpiReadStatus(CC1101_MARCSTATE) & 0x1F) == expected) return true;
+    delayMicroseconds(100);
+  } while (millis() - started < timeoutMs);
+  ++cc1101StateTimeouts;
+  Serial.printf("[CC1101] state timeout, wanted=%02X MARC=%02X count=%lu\n",
+    expected, ELECHOUSE_cc1101.SpiReadStatus(CC1101_MARCSTATE),
+    static_cast<unsigned long>(cc1101StateTimeouts));
+  return false;
+}
+
 bool setupCC1101() {
-  if (!ensureCC1101Initialized()) {
-    return false;
-  }
-  ELECHOUSE_cc1101.SpiStrobe(0x36);
-  delayMicroseconds(100);
+  if (!ensureCC1101Initialized()) return false;
+  const bool resumeDecoder = rcSwitchReceiveEnabled;
+  disableRcSwitchReceive();
   configureCC1101();
-  return true;
+  const bool ready = waitCC1101State(0x0D); // RX after automatic calibration.
+  rcswitch.resetAvailable();
+  if (ready && resumeDecoder) enableRcSwitchReceive();
+  return ready;
 }
 
 void configureCC1101() {
+  // Restore the complete AM270 asynchronous receive profile. Merely changing
+  // modulation/BW leaves packet/GDO/sync/AGC state from previous applications.
+  ELECHOUSE_cc1101.SpiStrobe(CC1101_SIDLE);
+  if (!waitCC1101State(0x01)) return;
+  const byte rxBytes = ELECHOUSE_cc1101.SpiReadStatus(CC1101_RXBYTES);
+  if (rxBytes & 0x80) ++cc1101FifoRecoveries;
+  ELECHOUSE_cc1101.SpiStrobe(CC1101_SFRX);
+  ELECHOUSE_cc1101.setCCMode(false);
   ELECHOUSE_cc1101.setModulation(2);
   ELECHOUSE_cc1101.setMHZ(frequency);
-  ELECHOUSE_cc1101.setRxBW(270.0);
-  ELECHOUSE_cc1101.setDeviation(0);
-  ELECHOUSE_cc1101.setPA(12);
-  ELECHOUSE_cc1101.SpiStrobe(0x36);
-  delayMicroseconds(100);
-  ELECHOUSE_cc1101.SetRx();
+  const byte registers[][2] = {
+    {CC1101_IOCFG0, 0x0D}, {CC1101_FIFOTHR, 0x47},
+    {CC1101_PKTCTRL0, 0x32}, {CC1101_PKTCTRL1, 0x04},
+    {CC1101_FSCTRL1, 0x06}, {CC1101_FSCTRL0, 0x00},
+    {CC1101_MDMCFG0, 0x00}, {CC1101_MDMCFG1, 0x00},
+    {CC1101_MDMCFG2, 0x30}, {CC1101_MDMCFG3, 0x32},
+    {CC1101_MDMCFG4, 0x67}, {CC1101_DEVIATN, 0x00},
+    {CC1101_MCSM0, 0x18}, {CC1101_MCSM1, 0x00},
+    {CC1101_MCSM2, 0x07}, {CC1101_FOCCFG, 0x18},
+    {CC1101_AGCCTRL0, 0x40}, {CC1101_AGCCTRL1, 0x00},
+    {CC1101_AGCCTRL2, 0x03}, {CC1101_WORCTRL, 0xFB},
+    {CC1101_FREND0, 0x11}, {CC1101_FREND1, 0xB6}
+  };
+  bool verified = true;
+  for (const auto& reg : registers) {
+    ELECHOUSE_cc1101.SpiWriteReg(reg[0], reg[1]);
+    if (ELECHOUSE_cc1101.SpiReadReg(reg[0]) != reg[1]) {
+      verified = false;
+      ++cc1101ReadbackErrors;
+      Serial.printf("[CC1101] config readback failed reg=%02X expected=%02X\n", reg[0], reg[1]);
+    }
+  }
+  pinMode(cc1101GDO0Pin, INPUT);
+  if (verified) ELECHOUSE_cc1101.SetRx();
+  Serial.printf("[CC1101] part=%02X version=%02X GDO0=%u CS=%u freq=%.5f "
+                "preset=AM270 MARC=%02X SPIerr=%lu recovery=%lu\n",
+    ELECHOUSE_cc1101.SpiReadStatus(CC1101_PARTNUM),
+    ELECHOUSE_cc1101.SpiReadStatus(CC1101_VERSION), cc1101GDO0Pin, cc1101CSPin,
+    frequency, ELECHOUSE_cc1101.SpiReadStatus(CC1101_MARCSTATE),
+    static_cast<unsigned long>(cc1101ReadbackErrors),
+    static_cast<unsigned long>(cc1101FifoRecoveries));
 }
 
 void restoreReceiveMode() {
-  if (!ensureCC1101Initialized()) {
-    return;
-  }
-
-  configureCC1101();
-
-  disableRcSwitchReceive();
-  enableRcSwitchReceive();
-  rcswitch.resetAvailable();
+  suspendLegacyReceive();
+  if (setupCC1101()) enableRcSwitchReceive();
 }
 
 void read_rcswitch(tpKeyData* kd) {
-  uint32_t decoded = rcswitch.getReceivedValue();
-  if (decoded) {
-    signals++;
-    kd->frequency = frequency;
-    int numBytes = (kd->bitLength + 7) / 8;
-    if (numBytes > 4) numBytes = 4;
-    for (int i = 0; i < 8; i++) {
-      kd->keyID[i] = (i < 8 - numBytes) ? 0 : (decoded >> ((numBytes - 1 - (i - (8 - numBytes))) * 8)) & 0xFF;
-    }
-    kd->type = (rcswitch.getReceivedProtocol() == 1 && rcswitch.getReceivedBitlength() == 24) ? kPrinceton : kRcSwitch;
-    if (rcswitch.getReceivedBitlength() <= 40 && rcswitch.getReceivedProtocol() == 11) {
-      kd->type = kCAME;
-    }
-    kd->te = rcswitch.getReceivedDelay();
-    kd->bitLength = rcswitch.getReceivedBitlength();
-    kd->codeLenth = kd->bitLength;
-    strncpy(kd->preset, "0", sizeof(kd->preset) - 1);
-    kd->preset[sizeof(kd->preset) - 1] = '\0';
-    kd->rawData[0] = '\0';
-    unsigned int* raw = rcswitch.getReceivedRawdata();
-    String rawStr = "";
-    for (int i = 0; i < kd->bitLength * 2 && i < 15; i++) {
-      if (i > 0) rawStr += " ";
-      int sign = (i % 2 == 0) ? 1 : -1;
-      rawStr += String(sign * (int)raw[i]);
-    }
-    strncpy(kd->rawData, rawStr.c_str(), sizeof(kd->rawData) - 1);
-    kd->rawData[sizeof(kd->rawData) - 1] = '\0';
-    validKeyReceived = true;
-    OLED_printKey(kd, "", false);
-  }
+  // rc-switch overwrites shared metadata from its GPIO ISR. Copy and acknowledge
+  // it together on the owner core before any display or storage work.
+  noInterrupts();
+  const uint32_t decoded = rcswitch.getReceivedValue();
+  const unsigned int bitLength = rcswitch.getReceivedBitlength();
+  const unsigned int pulseDelay = rcswitch.getReceivedDelay();
+  const unsigned int protocol = rcswitch.getReceivedProtocol();
   rcswitch.resetAvailable();
+  interrupts();
+  if (!decoded || bitLength == 0 || bitLength > 32) return;
+  memset(kd, 0, sizeof(*kd));
+  ++signals;
+  kd->frequency = frequency;
+  kd->bitLength = bitLength;
+  kd->codeLenth = bitLength;
+  const unsigned int numBytes = (bitLength + 7) / 8;
+  for (unsigned int i = 0; i < numBytes; ++i) {
+    kd->keyID[7 - i] = (decoded >> (i * 8)) & 0xFF;
+  }
+  kd->type = (protocol == 1 && bitLength == 24) ? kPrinceton : kRcSwitch;
+  if (protocol == 11 && bitLength <= 32) kd->type = kCAME;
+  kd->te = pulseDelay;
+  strcpy(kd->preset, "AM270");
+  // No truncated raw preview: decoded messages retain their key/TE metadata.
+  // Unknown waveforms are captured through the dedicated RAW interrupt ring.
+  validKeyReceived = true;
+  Serial.printf("[RX] decoder=rc-switch protocol=%u bits=%u key=%08lX\n",
+                protocol, bitLength, static_cast<unsigned long>(decoded));
+  OLED_printKey(kd, "", false);
 }
 
 void read_raw(tpKeyData* kd) {
-  unsigned int* raw = rcswitch.getReceivedRawdata();
-  uint32_t decoded = rcswitch.getReceivedValue();
-  String data = "";
-  int transitions = 0;
-  for (transitions = 0; transitions < MAX_DATA_LOG && raw[transitions] != 0; transitions++) {
-    if (transitions > 0) data += " ";
-    int sign = (transitions % 2 == 0) ? 1 : -1;
-    data += String(sign * (int)raw[transitions]);
-  }
-  if (transitions > 20) {
-    signals++;
-    kd->frequency = frequency;
-    if (data.length() >= sizeof(kd->rawData)) {
-      data = data.substring(0, sizeof(kd->rawData) - 1);
-    }
-    strncpy(kd->rawData, data.c_str(), sizeof(kd->rawData) - 1);
-    kd->rawData[sizeof(kd->rawData) - 1] = '\0';
-    kd->type = kUnknown;
-    kd->te = 0;
-    kd->bitLength = 0;
-    strncpy(kd->preset, "0", sizeof(kd->preset) - 1);
-    kd->preset[sizeof(kd->preset) - 1] = '\0';
-    kd->codeLenth = transitions;
-    if (decoded) {
-      int numBytes = (rcswitch.getReceivedBitlength() + 7) / 8;
-      if (numBytes > 4) numBytes = 4;
-      for (int i = 0; i < 8; i++) {
-        kd->keyID[i] = (i < 8 - numBytes) ? 0 : (decoded >> ((numBytes - 1 - (i - (8 - numBytes))) * 8)) & 0xFF;
-      }
-      kd->type = (rcswitch.getReceivedProtocol() == 1 && rcswitch.getReceivedBitlength() == 24) ? kPrinceton : kRcSwitch;
-      if (rcswitch.getReceivedBitlength() <= 40 && rcswitch.getReceivedProtocol() == 11) {
-        kd->type = kCAME;
-      }
-      kd->te = rcswitch.getReceivedDelay();
-      kd->bitLength = rcswitch.getReceivedBitlength();
-      kd->codeLenth = kd->bitLength;
-      strncpy(kd->preset, "0", sizeof(kd->preset) - 1);
-      kd->preset[sizeof(kd->preset) - 1] = '\0';
-    } else {
-      if (transitions >= 129 && transitions <= 137) kd->type = kStarLine;
-      else if (transitions >= 133 && transitions <= 137) kd->type = kKeeLoq;
-      else if (transitions >= 40 && transitions <= 60) kd->type = kCAME;
-    }
-    validKeyReceived = true;
-    OLED_printKey(kd, "", false);
-  }
-  rcswitch.resetAvailable();
+  // Legacy Standard Read used to scan 512 entries from a 67-entry nonterminated
+  // rc-switch array. That decoder is not a generic RAW recorder.
+  read_rcswitch(kd);
 }
 
 void OLED_printWaitingSignal() {
@@ -1342,103 +1361,185 @@ bool startRawRecorderSession() {
   File file = SD.open(fileName, FILE_WRITE);
   if (!file) return false;
 
-  file.println(F("Filetype: Flipper SubGhz RAW File"));
-  file.println(F("Version: 1"));
-  file.print(F("Frequency: "));
-  file.println((unsigned long)(frequency * 1000000));
-  file.println(F("Preset: FuriHalSubGhzPresetOok650Async"));
-  file.println(F("Protocol: RAW"));
+  char header[192];
+  const int headerLength = snprintf(header, sizeof(header),
+    "Filetype: Flipper SubGhz RAW File\nVersion: 1\nFrequency: %lu\n"
+    "Preset: FuriHalSubGhzPresetOok270Async\nProtocol: RAW\n",
+    static_cast<unsigned long>(frequency * 1000000));
+  const bool wroteHeader = headerLength > 0 && headerLength < static_cast<int>(sizeof(header)) &&
+    file.write(reinterpret_cast<const uint8_t*>(header), headerLength) == static_cast<size_t>(headerLength);
+  file.flush();
+  const bool headerOk = wroteHeader && !file.getWriteError();
   file.close();
+  if (!headerOk) {
+    SD.remove(fileName);
+    return false;
+  }
 
   rawRecorderSessionFile = fileName;
   int lastSlash = fileName.lastIndexOf('/');
   rawRecorderLastFile = (lastSlash >= 0) ? fileName.substring(lastSlash + 1) : fileName;
   rawRecorderEdgeCount = 0;
-  pinMode(cc1101GDO0Pin, INPUT);
-  rawRecorderPrevLevel = digitalRead(cc1101GDO0Pin);
-  rawRecorderPrevEdgeUs = micros();
-  rawRecorderLastEdgeUs = rawRecorderPrevEdgeUs;
-  Serial.print(F("RAW session started: "));
+  rawRecorderPeakRssi = -127.0f;
+  rawRecorderFrameDamaged = false;
+  rawRecorderStorageFailed = false;
+  rawRecorderSeenLosses = 0;
+  rawRecorderRejectedFrames = 0;
+  disableRcSwitchReceive();
+  if (!research::raw_capture::start(cc1101GDO0Pin)) {
+    SD.remove(fileName);
+    rawRecorderSessionFile = "";
+    return false;
+  }
+  Serial.print(F("RAW interrupt session started: "));
   Serial.println(fileName);
   return true;
 }
 
-bool saveRawFrameToSession(const String& rawData, float rssi) {
-  (void)rssi;
-  if (rawRecorderSessionFile.length() == 0 || rawData.length() == 0) {
+bool saveRawFrameToSession() {
+  if (rawRecorderSessionFile.length() == 0 || rawRecorderEdgeCount == 0) return false;
+  if (rawRecorderStorageFailed) return false;
+  File file = SD.open(rawRecorderSessionFile, FILE_APPEND);
+  if (!file) {
+    rawRecorderStorageFailed = true;
+    Serial.println(F("[RAW] SD append open failed; session will be discarded"));
     return false;
   }
-
-  File file = SD.open(rawRecorderSessionFile, FILE_APPEND);
-  if (!file) return false;
-  file.print(F("RAW_Data: "));
-  file.println(rawData);
+  bool ok = file.print(F("RAW_Data: ")) == 10;
+  char chunk[192];
+  size_t used = 0;
+  for (int i = 0; i < rawRecorderEdgeCount && ok; ++i) {
+    // Flipper RAW format permits at most 512 durations on each RAW_Data line.
+    // A line break carries no extra timing interval.
+    if (i && (i % 512) == 0) {
+      if (used) ok = file.write(reinterpret_cast<const uint8_t*>(chunk), used) == used;
+      used = 0;
+      if (ok) ok = file.print('\n') == 1;
+      if (ok) ok = file.print(F("RAW_Data: ")) == 10;
+    }
+    if (!ok) break;
+    char token[16];
+    const int length = snprintf(token, sizeof(token), "%s%d", (i % 512) ? " " : "", rawRecorderEdges[i]);
+    if (length <= 0 || length >= static_cast<int>(sizeof(token))) { ok = false; break; }
+    if (used + length > sizeof(chunk)) {
+      ok = file.write(reinterpret_cast<const uint8_t*>(chunk), used) == used;
+      used = 0;
+    }
+    memcpy(chunk + used, token, length);
+    used += length;
+  }
+  if (ok && used) ok = file.write(reinterpret_cast<const uint8_t*>(chunk), used) == used;
+  if (ok) ok = file.print('\n') == 1;
+  file.flush();
+  if (file.getWriteError()) ok = false;
   file.close();
-  return true;
+  if (!ok) {
+    rawRecorderStorageFailed = true;
+    // Delete the session on close: a partially written RAW_Data line is invalid.
+    Serial.println(F("[RAW] SD write failed; session will be discarded"));
+  }
+  return ok;
 }
 
 void flushRawRecorderFrame() {
-  if (rawRecorderEdgeCount < RAW_REC_MIN_EDGES) {
-    rawRecorderEdgeCount = 0;
-    return;
-  }
-
-  rawRecorderLastRssi = ELECHOUSE_cc1101.getRssi();
-  if (rawRecorderLastRssi < rawRecorderRssiThreshold) {
-    rawRecorderEdgeCount = 0;
-    return;
-  }
-
-  String data = "";
-  for (int i = 0; i < rawRecorderEdgeCount; i++) {
-    if (i > 0) data += " ";
-    data += String(rawRecorderEdges[i]);
-  }
-
-  if (saveRawFrameToSession(data, rawRecorderLastRssi)) {
-    rawRecorderSavedCount++;
+  rawRecorderLastRssi = rawRecorderPeakRssi;
+  if (rawRecorderFrameDamaged) {
+    ++rawRecorderRejectedFrames;
+    Serial.printf("[RAW] damaged frame rejected; total=%lu\n",
+                  static_cast<unsigned long>(rawRecorderRejectedFrames));
+  } else if (rawRecorderEdgeCount >= RAW_REC_MIN_EDGES &&
+             // No in-burst RSSI sample is different from a weak measured burst.
+             (rawRecorderPeakRssi <= -127.0f || rawRecorderPeakRssi >= rawRecorderRssiThreshold)) {
+    if (saveRawFrameToSession()) ++rawRecorderSavedCount;
   }
   rawRecorderEdgeCount = 0;
+  rawRecorderPeakRssi = -127.0f;
+  rawRecorderFrameDamaged = false;
 }
 
 void stopRawRecorderSession(bool flushPending, bool discardFile) {
-  String fileToDiscard = rawRecorderSessionFile;
+  research::raw_capture::stop();
+  const uint32_t captureStoppedAtUs = micros();
   if (flushPending) {
+    handleRawRecorderCapture();
+    const auto capture = research::raw_capture::snapshot();
+    const uint32_t terminal = captureStoppedAtUs - capture.lastEdgeUs;
+    if (rawRecorderEdgeCount && terminal && terminal <= INT32_MAX) {
+      if (rawRecorderEdgeCount < RAW_REC_MAX_EDGES) {
+        rawRecorderEdges[rawRecorderEdgeCount++] = capture.lastLevel ? static_cast<int>(terminal)
+                                                                  : -static_cast<int>(terminal);
+      } else rawRecorderFrameDamaged = true;
+    }
     flushRawRecorderFrame();
-  } else {
-    rawRecorderEdgeCount = 0;
-  }
+  } else rawRecorderEdgeCount = 0;
+  const auto capture = research::raw_capture::snapshot();
+  Serial.printf("[RAW] edges=%lu captured=%lu dropped=%lu rejected=%lu high=%u frames=%u damaged=%lu\n",
+    static_cast<unsigned long>(capture.edges), static_cast<unsigned long>(capture.captured),
+    static_cast<unsigned long>(capture.dropped), static_cast<unsigned long>(capture.rejected),
+    capture.highWater, rawRecorderSavedCount, static_cast<unsigned long>(rawRecorderRejectedFrames));
+  String fileToDiscard = rawRecorderSessionFile;
   rawRecorderSessionFile = "";
-  if (discardFile && fileToDiscard.length() > 0 && SD.exists(fileToDiscard)) {
+  const bool emptySession = flushPending && rawRecorderSavedCount == 0;
+  if ((discardFile || rawRecorderStorageFailed || emptySession) && fileToDiscard.length() && SD.exists(fileToDiscard)) {
     SD.remove(fileToDiscard);
+    rawRecorderSavedCount = 0;
+    rawRecorderStoppedFile = "";
+    rawRecorderLastFile = "";
+  }
+  if (capture.dropped || capture.rejected || rawRecorderRejectedFrames || rawRecorderStorageFailed) {
+    OLED_printError(rawRecorderStorageFailed ? F("SD error: discarded") : F("RAW loss: see serial"), true);
+    delay(900); // Capture is stopped before displaying the explicit loss warning.
+  } else if (emptySession && !discardFile) {
+    OLED_printError(F("No valid RAW frames"), true);
+    delay(900);
   }
 }
 
 void handleRawRecorderCapture() {
-  unsigned long nowUs = micros();
-  int level = digitalRead(cc1101GDO0Pin);
-
-  if (level != rawRecorderPrevLevel) {
-    unsigned long durUs = nowUs - rawRecorderPrevEdgeUs;
-    rawRecorderPrevEdgeUs = nowUs;
-    rawRecorderLastEdgeUs = nowUs;
-
-    if (durUs >= 40 && durUs <= 60000 && rawRecorderEdgeCount < RAW_REC_MAX_EDGES) {
-      int signedDur = rawRecorderPrevLevel ? (int)durUs : -(int)durUs;
-      rawRecorderEdges[rawRecorderEdgeCount++] = signedDur;
-    } else if (durUs > 60000 && rawRecorderEdgeCount >= RAW_REC_MIN_EDGES) {
-      flushRawRecorderFrame();
-    } else if (rawRecorderEdgeCount >= RAW_REC_MAX_EDGES) {
-      flushRawRecorderFrame();
-    }
-
-    rawRecorderPrevLevel = level;
+  const auto capture = research::raw_capture::snapshot();
+  const uint32_t losses = capture.dropped + capture.rejected;
+  if (losses != rawRecorderSeenLosses) {
+    rawRecorderSeenLosses = losses;
+    rawRecorderFrameDamaged = true;
+    Serial.printf("[RAW] capture loss=%lu; rejecting frame until next gap\n",
+                  static_cast<unsigned long>(losses));
+    // The gap may have occurred before the loss in the backlog. Discard the
+    // entire queued backlog; resynchronize at a future, observed long gap.
+    int32_t discarded;
+    for (uint16_t i = 0; i < research::raw_capture::kCapacity &&
+         research::raw_capture::pop(discarded); ++i) {}
+    rawRecorderEdgeCount = 0;
+    return;
   }
-
-  if (rawRecorderEdgeCount >= RAW_REC_MIN_EDGES && (nowUs - rawRecorderLastEdgeUs) > RAW_REC_FRAME_GAP_US) {
-    flushRawRecorderFrame();
-    rawRecorderPrevEdgeUs = nowUs;
-    rawRecorderLastEdgeUs = nowUs;
+  const uint32_t now = micros();
+  if (capture.running && capture.edges && now - capture.lastEdgeUs < RAW_REC_FRAME_GAP_US &&
+      now - rawRecorderRssiSampleUs >= 1000) {
+    rawRecorderRssiSampleUs = now;
+    const float rssi = ELECHOUSE_cc1101.getRssi();
+    if (rssi > rawRecorderPeakRssi) rawRecorderPeakRssi = rssi;
+  }
+  int32_t interval;
+  // Bound work per UI iteration. ISR capture continues during SD/OLED writes.
+  for (uint16_t processed = 0; processed < research::raw_capture::kCapacity &&
+       research::raw_capture::pop(interval); ++processed) {
+    // SD can stall long enough to overflow while a previous complete frame is
+    // written. Recheck before consuming the next interval or saving a new frame.
+    const auto current = research::raw_capture::snapshot();
+    if (current.dropped + current.rejected != rawRecorderSeenLosses) {
+      rawRecorderSeenLosses = current.dropped + current.rejected;
+      rawRecorderFrameDamaged = true;
+      rawRecorderEdgeCount = 0;
+      for (uint16_t i = 0; i < research::raw_capture::kCapacity &&
+           research::raw_capture::pop(interval); ++i) {}
+      Serial.println(F("[RAW] capture loss during storage/UI; frame rejected"));
+      return;
+    }
+    const uint32_t duration = interval < 0 ? -interval : interval;
+    if (!rawRecorderFrameDamaged) {
+      if (rawRecorderEdgeCount < RAW_REC_MAX_EDGES) rawRecorderEdges[rawRecorderEdgeCount++] = interval;
+      else rawRecorderFrameDamaged = true;
+    }
+    if (duration >= RAW_REC_FRAME_GAP_US) flushRawRecorderFrame();
   }
 }
 
@@ -1456,24 +1557,26 @@ bool saveKeyToSD(tpKeyData* kd) {
     Serial.println(fileName);
     return false;
   }
-  file.println(F("Filetype: Flipper SubGhz Key File"));
-  file.println(F("Version: 1"));
-  file.print(F("Frequency: "));
-  file.println((unsigned long)(kd->frequency * 1000000));
-  file.print(F("Protocol: "));
-  file.println(getTypeName(kd->type));
-  file.print(F("Bit: "));
-  file.println(kd->bitLength);
-  file.print(F("Key: "));
+  char keyHex[24];
   for (int i = 0; i < 8; i++) {
-    if (kd->keyID[i] < 0x10) file.print("0");
-    file.print(kd->keyID[i], HEX);
-    if (i < 7) file.print(" ");
+    snprintf(keyHex + i * 3, sizeof(keyHex) - i * 3, "%02X%s", kd->keyID[i], i == 7 ? "" : " ");
   }
-  file.println();
-  file.print(F("TE: "));
-  file.println(kd->te);
+  char record[320];
+  const String protocol = getTypeName(kd->type);
+  const int recordLength = snprintf(record, sizeof(record),
+    "Filetype: Flipper SubGhz Key File\nVersion: 1\nFrequency: %lu\n"
+    "Preset: FuriHalSubGhzPresetOok270Async\nProtocol: %s\nBit: %d\nKey: %s\nTE: %d\n",
+    static_cast<unsigned long>(kd->frequency * 1000000), protocol.c_str(), kd->bitLength, keyHex, kd->te);
+  const bool wroteRecord = recordLength > 0 && recordLength < static_cast<int>(sizeof(record)) &&
+    file.write(reinterpret_cast<const uint8_t*>(record), recordLength) == static_cast<size_t>(recordLength);
+  file.flush();
+  const bool complete = wroteRecord && !file.getWriteError();
   file.close();
+  if (!complete) {
+    SD.remove(fileName);
+    Serial.println(F("[RX] SD write failed; incomplete recording discarded"));
+    return false;
+  }
   Serial.print(F("Saved to "));
   Serial.println(fileName);
   return true;
@@ -1969,7 +2072,7 @@ bool playRawRecorderFile(const String& fileName) {
 
   ELECHOUSE_cc1101.setModulation(2);
   ELECHOUSE_cc1101.setRxBW(270.0);
-  ELECHOUSE_cc1101.setDeviation(0);
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_DEVIATN, 0);
   ELECHOUSE_cc1101.setDRate(10);
   ELECHOUSE_cc1101.setPA(12);
   ELECHOUSE_cc1101.SetTx();
@@ -2655,7 +2758,7 @@ void startJamming() {
   ELECHOUSE_cc1101.setModulation(0);
   ELECHOUSE_cc1101.setMHZ(frequency);
   ELECHOUSE_cc1101.setPA(12);
-  ELECHOUSE_cc1101.setDeviation(0);
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_DEVIATN, 0);
   ELECHOUSE_cc1101.setRxBW(270.0);
   ELECHOUSE_cc1101.SetTx();
   ELECHOUSE_cc1101.SpiWriteReg(0x3E, 0xFF);

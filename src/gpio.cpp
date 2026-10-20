@@ -158,13 +158,12 @@ bool isNRF24UsingCC1101Pins() {
 }
 
 byte getSubGHzCC1101GDO0Pin() {
-  loadNRF24Config();
-  return isNRF24UsingCC1101Pins() ? GPIO_A : CC1101_GDO0;
+  // This assembled ESP-WROOM-32 build keeps the original CC1101 wiring.
+  return CC1101_GDO0;
 }
 
 byte getSubGHzCC1101CSPin() {
-  loadNRF24Config();
-  return isNRF24UsingCC1101Pins() ? GPIO_B : CC1101_CS;
+  return CC1101_CS;
 }
 
 void setDefaultNRF24BusPins() {
@@ -195,7 +194,8 @@ void applyStoredNRF24Config(const StoredNRF24Config& stored) {
   nrf24Config.mosiPin = stored.mosiPin;
   nrf24Config.misoPin = stored.misoPin;
   nrf24Config.sckPin = stored.sckPin;
-  if ((nrf24Config.cePin == CC1101_GDO0) != (nrf24Config.csnPin == CC1101_CS)) {
+  if (nrf24Config.cePin == CC1101_GDO0 || nrf24Config.csnPin == CC1101_CS) {
+    Serial.println(F("[GPIO] reserved CC1101 pins 4/5; NRF24 uses GPIO16/2"));
     setDefaultNRF24BusPins();
   }
 }
@@ -454,6 +454,11 @@ void returnToNRF24Menu(byte menuIndex) {
 
 bool initializeNRF24() {
   loadNRF24Config();
+  if (nrf24Config.cePin == CC1101_GDO0 || nrf24Config.cePin == CC1101_CS ||
+      nrf24Config.csnPin == CC1101_GDO0 || nrf24Config.csnPin == CC1101_CS) {
+    Serial.println(F("[GPIO] NRF24 cannot use reserved CC1101 pins 4/5"));
+    return false;
+  }
   pinMode(nrf24Config.csnPin, OUTPUT);
   digitalWrite(nrf24Config.csnPin, HIGH);
   pinMode(nrf24Config.cePin, OUTPUT);
