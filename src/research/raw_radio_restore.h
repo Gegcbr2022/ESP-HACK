@@ -30,33 +30,36 @@ public:
         finished_=true;
         if(!dirty_) return captured_;
         bool ok=b_.stopRmt();
+        if(!ok)b_.failure("rmt",0,0,0);
         b_.safePin();
         bool inIdle=b_.idle();
         if(!inIdle) {
+            b_.failure("idle",0x35,1,0);
             ok=false;
             inIdle=b_.idle(); // One bounded retry; config is never written in TX.
         }
         const uint8_t zero[8]={};
-        if(!b_.writePa(zero)) ok=false;
+        if(!b_.writePa(zero)) { b_.failure("pa-zero",0x3E,0,0);ok=false; }
         // Disable entry autocal temporarily: saved FSCAL and the already
         // trimmed frequency word must survive RX re-entry byte-for-byte.
         if(inIdle) for(size_t i=0;i<47;++i) {
             const uint8_t value=i==0x18?uint8_t(regs_[i]&~0x30):regs_[i];
-            if(!b_.writeReg(uint8_t(i),value)) ok=false;
+            if(!b_.writeReg(uint8_t(i),value)) { b_.failure("reg-write",uint8_t(i),value,0);ok=false; }
         }
-        if(ok && previous_==13 && !b_.enterRx()) ok=false;
-        if(inIdle && !b_.writeReg(0x18,regs_[0x18])) ok=false;
+        if(ok && previous_==13 && !b_.enterRx()) { b_.failure("rx-entry",0x35,13,0);ok=false; }
+        if(inIdle && !b_.writeReg(0x18,regs_[0x18])) { b_.failure("mcsm0",0x18,regs_[0x18],0);ok=false; }
         for(size_t i=0;i<47;++i) {
-            uint8_t value;
-            if(!b_.readReg(uint8_t(i),value) || value!=regs_[i]) ok=false;
+            uint8_t value=0;
+            if(!b_.readReg(uint8_t(i),value)) { b_.failure("reg-read",uint8_t(i),regs_[i],value);ok=false; }
+            else if(value!=regs_[i]) { b_.failure("reg-mismatch",uint8_t(i),regs_[i],value);ok=false; }
         }
         // PA remains zero throughout rearm/readback. Only restore it after
         // successful non-transmitting RX/IDLE entry and exact config checks.
-        if(ok && !b_.writePa(pa_)) ok=false;
+        if(ok && !b_.writePa(pa_)) { b_.failure("pa-write",0x3E,pa_[0],0);ok=false; }
         uint8_t actualPa[8]={}, actualState=0;
-        if(ok && !b_.readPa(actualPa)) ok=false;
-        if(ok) for(size_t i=0;i<8;++i) if(actualPa[i]!=pa_[i]) ok=false;
-        if(ok && (!b_.readState(actualState) || actualState!=previous_)) ok=false;
+        if(ok && !b_.readPa(actualPa)) { b_.failure("pa-read",0x3E,0,0);ok=false; }
+        if(ok) for(size_t i=0;i<8;++i) if(actualPa[i]!=pa_[i]) { b_.failure("pa-mismatch",uint8_t(i),pa_[i],actualPa[i]);ok=false; }
+        if(ok && (!b_.readState(actualState) || actualState!=previous_)) { b_.failure("state",0x35,previous_,actualState);ok=false; }
         if(!ok) {
             b_.writePa(zero);
             b_.idle();

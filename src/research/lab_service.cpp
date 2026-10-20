@@ -67,11 +67,15 @@ uint8_t stableStatus(uint8_t address);
 struct RawRestoreBackend {
     struct PinState { uint32_t mux, pin, outputSelect; bool enabled, high; };
     bool installed=false;
+    bool failurePrinted=false;
+    uint8_t lastMarc=0;
+    esp_err_t stopResult=ESP_OK,uninstallResult=ESP_OK;
     static_assert(CC1101_GDO0<32,"RAW GPIO snapshot targets the original GPIO bank");
     bool ready() const { return ELECHOUSE_cc1101.spiReady(); }
     bool readState(uint8_t& value) {
         const uint32_t before=ELECHOUSE_cc1101.spiTimeouts();
         value=stableStatus(0x35)&0x1F;
+        lastMarc=value;
         return before!=UINT32_MAX && ELECHOUSE_cc1101.spiTimeouts()==before;
     }
     bool readReg(uint8_t address,uint8_t& value) {
@@ -136,10 +140,17 @@ struct RawRestoreBackend {
     }
     bool stopRmt() {
         if(!installed)return true;
-        const bool stopped=rmt_tx_stop(RMT_CHANNEL_0)==ESP_OK;
-        const bool released=rmt_driver_uninstall(RMT_CHANNEL_0)==ESP_OK;
+        stopResult=rmt_tx_stop(RMT_CHANNEL_0);
+        uninstallResult=rmt_driver_uninstall(RMT_CHANNEL_0);
         installed=false;
-        return stopped&&released;
+        return stopResult==ESP_OK&&uninstallResult==ESP_OK;
+    }
+    void failure(const char* phase,uint8_t address,uint8_t expected,uint8_t actual) {
+        if(failurePrinted)return;
+        failurePrinted=true;
+        Serial.printf("[RAWRestore] FAIL phase=%s addr=%02X expected=%02X actual=%02X marc=%02X rmtStop=%ld rmtFree=%ld spiReady=%u miso=%lu\n",
+            phase,address,expected,actual,lastMarc,(long)stopResult,(long)uninstallResult,
+            ELECHOUSE_cc1101.spiReady(),(unsigned long)ELECHOUSE_cc1101.spiTimeouts());
     }
     void restored(bool ok) {
         if(!ok) { errorCount(&LabSnapshot::spiErrors); status("Radio restore failed; RX stopped"); }

@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <cstdarg>
 using namespace research;
 static unsigned checks;
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
@@ -21,6 +22,13 @@ static RadioSettings activeSettings;
 static bool stopRequested=false,syncSeen=false;
 static uint32_t rxArmedAt=0,syncStarted=0,clockUs=0;
 static std::string lastStatus;
+struct MockSerial {
+    std::string output;
+    void printf(const char* format,...) {
+        char buffer[256];va_list args;va_start(args,format);
+        std::vsnprintf(buffer,sizeof(buffer),format,args);va_end(args);output+=buffer;
+    }
+} Serial;
 static unsigned stopCalls,configureCalls,txStrobes,rmtStops,rmtUninstalls,rxEntries;
 static uint32_t transmittedWord,configureHz;
 static bool workerStopped=true,failConfigure=false,failIdle=false,failPower=false;
@@ -141,7 +149,7 @@ static void reset(uint8_t prior=13){
     failWrite=failPoll=cancelBack=cancelStop=runTimeout=failRmtStop=failUninstall=driverInstalled=restorationPhase=permanentSpi=false;
     corruptRestoreReg=corruptRestorePa=false;
     restoreFailAt=restoreIo=snapshotFailAt=snapshotIo=stopCalls=configureCalls=txStrobes=rmtStops=rmtUninstalls=rxEntries=0;
-    configureHz=transmittedWord=clockUs=0;rmtItems=nullptr;lastStatus.clear();
+    configureHz=transmittedWord=clockUs=0;rmtItems=nullptr;lastStatus.clear();Serial.output.clear();
 }
 static void checkPin(){CHECK(mux[4]==original.mux);CHECK(GPIO.pin[4].val==original.pin);CHECK(GPIO.func_out_sel_cfg[4].val==original.outSelect);CHECK(GPIO.enable==original.enable);CHECK(GPIO.out==original.out);}
 static void checkRestored(){
@@ -182,6 +190,8 @@ int main(){
     for(bool* failed:{&failRmtStop,&failUninstall}){reset();*failed=true;CHECK(!transmit());CHECK(ELECHOUSE_cc1101.marc==1);checkPin();}
     for(bool* corrupt:{&corruptRestoreReg,&corruptRestorePa}){
         reset();*corrupt=true;CHECK(!transmit());CHECK(lastStatus=="Radio restore failed; RX stopped");
+        CHECK(Serial.output.find(corrupt==&corruptRestoreReg?"phase=reg-mismatch":"phase=pa-mismatch")!=std::string::npos);
+        CHECK(Serial.output.find('\n')==Serial.output.rfind('\n'));
         CHECK(ELECHOUSE_cc1101.marc==1&&ELECHOUSE_cc1101.spiReady());
         for(unsigned i=0;i<8;++i)CHECK(ELECHOUSE_cc1101.pa[i]==0);
         checkPin();
