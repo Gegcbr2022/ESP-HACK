@@ -9,6 +9,7 @@
 #include "rf_clock_probe.h"
 #include "static_sub_encoder.h"
 #include "file_page.h"
+#include "file_entry.h"
 #include "../interface/ui_text.h"
 #include "../../shared/flipper_chat_compat.h"
 #include "../../shared/chat_session.h"
@@ -33,19 +34,22 @@ uint32_t sweepStep = 25000;
 int32_t waveform[kWaveformCapacity];
 size_t waveformCount;
 SubInfo openedInfo;
-char paths[40][112];
-bool pathIsDir[40];
-bool pathIsNextPage[40], folderOpenError;
-size_t pathCount;
+bool openedFileValid;
+FileEntry fileEntries[FilePage::kEntries];
+bool fileHasNext, folderOpenError;
+size_t pathCount, fileEntryCount;
+uint64_t matchingFileCount;
 uint32_t filePage, longPathCount;
 char activePreset[64] = "AM270";
-char currentFolder[112] = "/subghz";
+char currentFolder[kRadioPathCapacity] = "/subghz";
+char selectedFilePath[kRadioPathCapacity];
+char operationPath[kRadioPathCapacity];
 char filter[32] = "";
 char notice[80] = "";
 char fileErrorRu[160] = "";
 bool radioLabHomeOpen;
 uint32_t lastFrame;
-bool up, down, ok, back, holdOk, holdBack;
+bool up, down, ok, back, holdOk, holdBack, holdUp, holdDown;
 bool serialChatContext, serialChatListen, serialChatReported, serialChatCloseRequested;
 bool serialChatOpenPending;
 
@@ -68,6 +72,9 @@ __attribute__((noinline)) void printChatStatus() {
         s.registers[0x0D],s.registers[0x0E],s.registers[0x0F],s.registers[0x0B],s.registers[0x0C],
         s.registers[0x13],s.registers[0x14],s.registers[0x15],s.registers[0x1A],s.registers[0x19],
         s.registers[0x1B],s.registers[0x1C],s.registers[0x1D],s.registers[0x21],s.registers[0x22]);
+    Serial.printf("[Chat] cached FSCAL=%02X/%02X/%02X/%02X TEST=%02X/%02X/%02X\n",
+        s.registers[0x23],s.registers[0x24],s.registers[0x25],s.registers[0x26],
+        s.registers[0x2C],s.registers[0x2D],s.registers[0x2E]);
     if(s.message[0])Serial.printf("[Chat] last=%s\n",s.message);
 }
 
@@ -77,10 +84,11 @@ void input() {
     up = buttonUp.isClick(); down = buttonDown.isClick();
     ok = buttonOK.isClick(); back = buttonBack.isClick();
     holdOk = buttonOK.isHolded(); holdBack = buttonBack.isHolded();
+    holdUp = buttonUp.isHolded(); holdDown = buttonDown.isHolded();
     // A serial close unwinds the same nested chat dialogs as a held BACK.
     // Suppress simultaneous selection so closing cannot queue another send.
     if(serialChatContext && serialChatCloseRequested) {
-        up = down = ok = holdOk = false; back = holdBack = true;
+        up = down = ok = holdOk = holdUp = holdDown = false; back = holdBack = true;
     }
     delay(2);
 }
@@ -158,7 +166,7 @@ bool validLeaf(const char* name) {
     return !strstr(name, "..");
 }
 bool safePath(const char* path) {
-    return path && !strncmp(path, "/subghz/", 8) && !strstr(path, "..") && !strchr(path, '\\') && strlen(path) < 112;
+    return radioFilePath(path);
 }
 bool textToFile(void* context, const char* text, size_t length) {
     return static_cast<File*>(context)->write(reinterpret_cast<const uint8_t*>(text), length) == length;
@@ -171,7 +179,8 @@ bool stagePulse(void* context, int32_t pulse) {
     return true; // Inspection continues streaming even when playback staging is full.
 }
 bool inspectFile(const char* path) {
-    fileErrorRu[0]=0;
+    fileErrorRu[0]=0;openedFileValid=false;waveformCount=0;
+    openedInfo.kind=SubKind::Unknown;openedInfo.protocol[0]=0;
     if(!labStop()) { showNotice("Radio stop timed out");snprintf(fileErrorRu,sizeof(fileErrorRu),"Радио не остановилось."); return false; }
     File file = SD.open(path, FILE_READ);
     if(!file) { showNotice("SD open failed");snprintf(fileErrorRu,sizeof(fileErrorRu),"Не удалось открыть\nфайл на SD."); return false; }
@@ -190,7 +199,7 @@ bool inspectFile(const char* path) {
         snprintf(fileErrorRu,sizeof(fileErrorRu),"Строка %lu:\n%s",(unsigned long)parser.line(),parser.errorTextRu());
         showNotice(error); waveformCount = 0; return false;
     }
-    openedInfo = parser.info(); waveformCount = sink.full ? 0 : sink.used;
+    openedInfo = parser.info(); waveformCount = sink.full ? 0 : sink.used;openedFileValid=true;
     if(sink.full) showNotice("Inspected; exceeds 2048 pulse playback limit");
     else showNotice("File validated");
     return true;
@@ -345,30 +354,50 @@ void listFiles() {
     // At most39 actual paths plus one explicit navigation row. A second scan
     // is needed only when a deletion made the requested last page disappear.
     for(unsigned pass=0;pass<2;++pass) {
-        pathCount=0;longPathCount=0;folderOpenError=false;
-        memset(pathIsNextPage,0,sizeof(pathIsNextPage));
+        pathCount=fileEntryCount=0;longPathCount=0;folderOpenError=false;fileHasNext=false;matchingFileCount=0;
         File folder=SD.open(currentFolder);if(!folder){folderOpenError=true;return;}
-        FilePage page(filePage);File item;unsigned scanned=0;
-        while((item=folder.openNextFile())) {
-            const char* name=item.name();const char* leaf=name?strrchr(name,'/'):nullptr;leaf=leaf?leaf+1:name;
+        FilePage page(filePage);uint32_t ordinal=0;unsigned scanned=0;
+        // Directory names avoid opening/stat'ing every payload while scanning.
+        // Only one transient Arduino String exists, regardless of directory size.
+        while(true) {
+            bool directory=false;String name=folder.getNextFileName(&directory);
+            if(!name.length())break;
+            const char* full=name.c_str();const char* leaf=strrchr(full,'/');leaf=leaf?leaf+1:full;
             if(leaf&&*leaf&&*leaf!='.'&&(!*filter||strstr(leaf,filter))) {
-                char complete[sizeof(paths[0])];
-                if(!completeFilePath(complete,sizeof(complete),currentFolder,leaf)) {
+                if(strlen(currentFolder)+1+strlen(leaf)>=kRadioPathCapacity) {
                     if(longPathCount!=UINT32_MAX)++longPathCount;
                 } else if(page.consider()) {
-                    memcpy(paths[pathCount],complete,strlen(complete)+1);
-                    pathIsDir[pathCount]=item.isDirectory();++pathCount;
+                    if(setFileEntry(fileEntries[fileEntryCount],leaf,ordinal,directory))++fileEntryCount;
                 }
             }
-            item.close();if((++scanned&15)==0)delay(1);
+            if(ordinal!=UINT32_MAX)++ordinal;
+            if((++scanned&15)==0)delay(1);
         }
         folder.close();
         if(filePage>page.lastPage()){filePage=page.lastPage();continue;}
-        if(page.more()) {
-            paths[pathCount][0]=0;pathIsDir[pathCount]=false;pathIsNextPage[pathCount]=true;++pathCount;
-        }
+        fileHasNext=page.more();matchingFileCount=page.total();pathCount=fileEntryCount+unsigned(fileHasNext);
         return;
     }
+}
+bool resolveFileEntry(size_t selected) {
+    selectedFilePath[0]=0;
+    if(selected>=fileEntryCount)return false;
+    const FileEntry& expected=fileEntries[selected];
+    File folder=SD.open(currentFolder);if(!folder)return false;
+    uint32_t ordinal=0;bool found=false;
+    while(true) {
+        bool directory=false;String name=folder.getNextFileName(&directory);
+        if(!name.length())break;
+        if(ordinal==expected.ordinal) {
+            const char* full=name.c_str();const char* leaf=strrchr(full,'/');leaf=leaf?leaf+1:full;
+            found=sameFileEntry(expected,leaf,ordinal,directory)&&
+                  completeFilePath(selectedFilePath,sizeof selectedFilePath,currentFolder,leaf)&&safePath(selectedFilePath);
+            break;
+        }
+        if(ordinal==UINT32_MAX)break;
+        ++ordinal;if(!(ordinal&15))delay(1);
+    }
+    folder.close();return found;
 }
 void metadataScreen() {
     char text[320];
@@ -379,7 +408,7 @@ void metadataScreen() {
     else snprintf(text,sizeof(text),"%lu.%03lu МГц\n%.63s\n%.63s\nБит: %u\nTE: %lu мкс\nGuard: %u\n%s",
         (unsigned long)(openedInfo.frequencyHz/1000000),(unsigned long)((openedInfo.frequencyHz/1000)%1000),openedInfo.preset,openedInfo.protocol,
         openedInfo.bits,(unsigned long)openedInfo.teUs,openedInfo.guardTime,
-        dynamicSubProtocol(openedInfo.protocol)?"Динамический код:\nнет кодировщика.":"");
+        dynamicSubProtocol(openedInfo.protocol)?"Передача протокола\nне поддержана.":"");
     message("О файле",text);
 }
 bool duplicateFile(const char* from,const char* to) {
@@ -414,18 +443,18 @@ void fileActions(const char* path,bool presetMode) {
                 while(true){input();if(back||holdBack)break;if(holdOk){remove=true;break;}if(frame()){title("Delete file?");line(2,path+8);footer("hold OK delete/BK exit");display.display();}}
                 if(remove)showNotice(SD.remove(path)?"Deleted":"Delete failed");break;
             } else {
-                char name[64]="";char destination[112];
+                char name[64]="";char* destination=operationPath;
                 if(selected==4) {
                     if(!textEntry("Folder under /subghz",name,sizeof(name),"abcdefghijklmnopqrstuvwxyz0123456789_-"))continue;
                     if(!validLeaf(name)){message("Path","Invalid folder");continue;}
                     char folder[80];snprintf(folder,sizeof(folder),"/subghz/%s",name);SD.mkdir(folder);
                     const char* leaf=strrchr(path,'/');
-                    if(!completeFilePath(destination,sizeof(destination),folder,leaf?leaf+1:path)){message("Путь","Путь длиннее 111 байт.\nФайл не изменён.");continue;}
+                    if(!completeFilePath(destination,kRadioPathCapacity,folder,leaf?leaf+1:path)){message("Путь","Путь длиннее 1023 байт.\nФайл не изменён.");continue;}
                 } else {
                     if(!textEntry("File name (no .sub)",name,sizeof(name),"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"))continue;
                     if(!validLeaf(name)){message("Path","Invalid file name");continue;}
                     char leaf[sizeof(name)+4];snprintf(leaf,sizeof(leaf),"%s.sub",name);
-                    if(!completeFilePath(destination,sizeof(destination),presetMode?"/subghz/presets":currentFolder,leaf)){message("Путь","Путь длиннее 111 байт.\nФайл не изменён.");continue;}
+                    if(!completeFilePath(destination,kRadioPathCapacity,presetMode?"/subghz/presets":currentFolder,leaf)){message("Путь","Путь длиннее 1023 байт.\nФайл не изменён.");continue;}
                 }
                 bool valid=safePath(destination)&&!SD.exists(destination);
                 if(valid)valid=selected==5?duplicateFile(path,destination):SD.rename(path,destination);
@@ -441,6 +470,7 @@ void fileActions(const char* path,bool presetMode) {
     resetInput();
 }
 const char* prepareOpenedFileSend(StaticSubWaveform& generated) {
+    if(!openedFileValid)return "Сначала откройте файл.";
     if(openedInfo.kind==SubKind::Key) {
         waveformCount=0;
         const StaticSubError result=encodeStaticSub(openedInfo,waveform,kWaveformCapacity,generated);
@@ -467,7 +497,8 @@ const char* prepareOpenedFileSend(StaticSubWaveform& generated) {
 }
 void sendOpenedFile(const char* path) {
     StaticSubWaveform generated={0,0,0,false};const char* error=prepareOpenedFileSend(generated);
-    if(error){message("Отправка",error);return;}
+    if(error){char detail[256];const char* reason=dynamicSubProtocol(openedInfo.protocol)?"Передача протокола\nне поддержана.":error;
+        snprintf(detail,sizeof detail,"Протокол: %.63s\n%s",openedInfo.protocol,reason);message("Отправка",detail);return;}
     const RadioSettings savedSettings=settings;const RegisterImage savedRadio=radio;
     const TxProfile savedProfile=profile;const uint8_t savedPower=powerIndex;
     RadioSettings fileSettings;
@@ -515,15 +546,20 @@ void browser(bool music=false,bool presets=false,bool friendly=false) {
     while(true) {
         input();
         if(holdBack)break;
+        if((holdDown&&fileHasNext)||(holdUp&&filePage)) {
+            if(holdDown){if(filePage<UINT32_MAX)++filePage;}else --filePage;
+            listFiles();selected=0;resetInput();continue;
+        }
         if(back){if(filePage){--filePage;listFiles();selected=0;}else{char* slash=strrchr(currentFolder,'/');if(slash&&slash>currentFolder+1){*slash=0;filePage=0;listFiles();selected=0;}else break;}}
         if(up&&pathCount)selected=(selected+pathCount-1)%pathCount;
         if(down&&pathCount)selected=(selected+1)%pathCount;
         if(holdOk){if(textEntry("Поиск: пусто = все",filter,sizeof(filter))){filePage=0;listFiles();selected=0;}resetInput();}
         if(ok&&pathCount) {
-            if(pathIsNextPage[selected]) {if(filePage<UINT32_MAX)++filePage;listFiles();selected=0;resetInput();}
-            else if(pathIsDir[selected]) {memcpy(currentFolder,paths[selected],strlen(paths[selected])+1);filePage=0;listFiles();selected=0;}
+            if(fileHasNext&&selected==fileEntryCount) {if(filePage<UINT32_MAX)++filePage;listFiles();selected=0;resetInput();continue;}
+            if(!resolveFileEntry(selected)){message("Файлы","Папка изменилась.\nОткройте файл снова.");listFiles();selected=0;resetInput();continue;}
+            if(fileEntries[selected].directory) {memcpy(currentFolder,selectedFilePath,strlen(selectedFilePath)+1);filePage=0;listFiles();selected=0;}
             else if(music) {
-                if(inspectFile(paths[selected])) {
+                if(inspectFile(selectedFilePath)) {
                     metadataScreen();
                     RadioSettings fileSettings;bool ook=describeRadio(openedInfo.radio,openedInfo.frequencyHz,fileSettings)&&fileSettings.modulation==Modulation::AskOok;
                     if(openedInfo.kind!=SubKind::Raw||!openedInfo.rawCompatible||!ook||!waveformCount)message("Music Lab","Requires RAW binary OOK, <=2048 pulses, <=5 seconds. FSK playback is unsupported.");
@@ -532,14 +568,15 @@ void browser(bool music=false,bool presets=false,bool friendly=false) {
                         while(!done){input();if(back||holdBack)break;if(holdOk){uint32_t elapsed;int32_t error;bool sent=labTransmitRaw(waveform,waveformCount,openedInfo.radio,openedInfo.frequencyHz,profile,powerIndex,settings.txLimitMs,elapsed,error);char b[150];snprintf(b,sizeof(b),"%s\nWall %lu us\nCompletion delta %ld us\nEdge jitter unmeasured",sent?"Waveform sent":"TX blocked/aborted",(unsigned long)elapsed,(long)error);message("Music timing",b);done=true;}if(frame()){title("Music Lab / RAW");line(2,"Hold OK: finite TX");line(3,profile==TxProfile::ShieldedLab?"Shielded lab enabled":"TX profile: receive only");line(4,"BACK stops transmission");footer("hold OK play BACK exit");display.display();}}
                     }
                 } else message("Music file error",notice);
-            } else {char path[112];snprintf(path,sizeof(path),"%s",paths[selected]);if(friendly)friendlyFileActions(path);else fileActions(path,presets);listFiles();if(selected>=pathCount)selected=0;}
+            } else {if(friendly)friendlyFileActions(selectedFilePath);else fileActions(selectedFilePath,presets);listFiles();if(selected>=pathCount)selected=0;}
         }
         if(frame()) {
-            char heading[64];snprintf(heading,sizeof(heading),"%s [%llu]",music?"Музыка":presets?"Пресеты":"Файлы",(unsigned long long)filePage+1);title(heading);ui_text::draw(display,0,13,currentFolder);
-            for(size_t row=0;row<3;++row){size_t i=selected+row;if(i>=pathCount)break;display.setCursor(0,25+row*9);display.print(row?"  ":"> ");if(pathIsNextPage[i])ui_text::print(display,"След. страница");else{const char* leaf=strrchr(paths[i],'/');display.print(pathIsDir[i]?"/":"");ui_text::print(display,leaf?leaf+1:paths[i]);}}
+            char heading[64];const uint64_t pages=matchingFileCount?(matchingFileCount-1)/FilePage::kEntries+1:1;
+            snprintf(heading,sizeof heading,"%s %llu/%llu (%llu)",music?"Музыка":presets?"Пресеты":"Файлы",(unsigned long long)filePage+1,(unsigned long long)pages,(unsigned long long)matchingFileCount);title(heading);ui_text::draw(display,0,13,currentFolder);
+            for(size_t row=0;row<3;++row){size_t i=selected+row;if(i>=pathCount)break;display.setCursor(0,25+row*9);display.print(row?"  ":"> ");if(fileHasNext&&i==fileEntryCount)ui_text::print(display,"След. страница");else{display.print(fileEntries[i].directory?"/":"");ui_text::print(display,fileEntries[i].preview);}}
             if(!pathCount)line(4,folderOpenError?"Папка не открылась":"Файлов пока нет");
-            if(longPathCount){char hint[48];snprintf(hint,sizeof(hint),"Путь>111Б:%lu",(unsigned long)longPathCount);footer(hint);}
-            else footer(filePage?"BACK:пред. держ:выход":"UP/DN OK:вход BACK");display.display();
+            if(longPathCount){char hint[48];snprintf(hint,sizeof(hint),"Путь>1023Б:%lu",(unsigned long)longPathCount);footer(hint);}
+            else footer(fileHasNext||filePage?"Держ.UP/DN:стр BACK":"UP/DN OK:вход BACK");display.display();
         }
     }
     resetInput();
@@ -839,6 +876,13 @@ void runRadioLabFile(const char* path) {
     while(!labStop()){showNotice("Waiting for radio worker to stop");delay(10);}
     restoreReceiveMode();resetInput();
 }
+void runRadioLabFiles() {
+    suspendLegacyReceive();
+    while(!research::labStop()){showNotice("Waiting for radio worker to stop");delay(10);}
+    browser(false,false,true);
+    while(!research::labStop()){showNotice("Waiting for radio worker to stop");delay(10);}
+    restoreReceiveMode();resetInput();
+}
 
 extern bool setupCC1101();
 void radioLabBootDiagnostics() {
@@ -1043,7 +1087,7 @@ void radioLabSerialPoll() {
             else if(handleIdleSerialCommand(command)){}
             else if(used)Serial.println("[RadioLab] commands: chatopen, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfclock, rflisten433, rftest princeton433, sublist /subghz, subinspect /subghz/file.sub, appsdiag, APP_PUT");
             used=0;overflow=false;
-        } else if(!overflow&&c>=32&&c<=126&&used+1<sizeof(command))command[used++]=c;
+        } else if(!overflow&&c>=32&&c<=126&&size_t(used)+1<sizeof(command))command[used++]=c;
         else overflow=true;
     }
 }

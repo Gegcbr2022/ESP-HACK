@@ -17,6 +17,7 @@ public:
         ++stored_;return true;
     }
     bool more() const{return more_;}
+    uint64_t total() const{return seen_;}
     uint32_t lastPage() const {
         const uint64_t page=seen_?(seen_-1)/kEntries:0;
         return page>UINT32_MAX?UINT32_MAX:uint32_t(page);

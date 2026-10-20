@@ -465,14 +465,9 @@ void runSubGHz() {
             OLED_printSubGHzMenu(display, menuIndex);
             continue;
           }
-          menuState = menuTransmit;
-          transmitIgnoreOkRelease = false;
-          transmitIgnoreBackRelease = false;
-          ExplorerInit(subExplorer, subFileList, MAX_FILES, subExplorerCfg);
-          ExplorerLoad(subExplorer, subExplorerCfg);
-          syncNextSignalIndexFromFiles();
-          ExplorerDraw(subExplorer, display);
+          runRadioLabFiles();
           resetButtonStates();
+          OLED_printSubGHzMenu(display, menuIndex);
         } else if (menuIndex == 3) {
           menuState = menuAnalyzer;
           setupCC1101();
