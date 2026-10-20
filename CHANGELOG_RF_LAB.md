@@ -42,13 +42,13 @@
   diagnostics for reproducing the user's failures in both RF directions.
   Both RF directions failed on the Russian `c5779ee` build; later controlled
   one-way valid-CRC reception required a device-local frequency correction.
-  The earlier verified `d63f1ca` image passed controlled two-way plaintext exchange with
+  The final `087f9b6` image passed controlled two-way plaintext exchange with
   the installed Flipper's internal-radio CLI at nominal 433.920 MHz using this
   ESP32's saved +115 ppm correction. Enhanced Chat GUI and ESP ACK/FAP delivery
   remain unverified. Local Sent is not a peer acknowledgement; finite TX governors remain active.
 - Expanded `appsdiag` to all eleven installed examples, up to 120 input/tick/draw
   frames per app with radio start disabled, followed by return to the main menu.
-  All eleven Russian apps passed 120 frames each on the final `d63f1ca` ESP32 build;
+  All eleven Russian apps passed 120 frames each on the final `087f9b6` ESP32 build;
   this does not validate the RF dashboard's physical radio measurements.
 - Passed native suites on Windows Zig and Ubuntu GCC: 91,990 Lua checks and
   16,500 sample frames, 758,551 catalog checks and 21,892 menu/migration checks.
@@ -66,11 +66,15 @@
   diagnostic candidate received valid-CRC Flipper packets at an adjusted
   programmed RX frequency. All three CI jobs also passed at `28e4d46`, including
   full-path browsing and device calibration. All three jobs also passed at
-  `d63f1ca`; its host carrier gate uses cached RSSI/sync state. The final image's
+  `d63f1ca`; its host carrier gate uses cached RSSI/sync state. That historical image's
   four flash segments verified, normal chat UI/Flipper CLI passed both RF
   directions without panic, and chat close restored the main menu.
-- The later `087f9b6` visible-keyboard source requires a new physical keyboard,
-  RF and eleven-app check; the recorded `d63f1ca` hardware result remains historical.
+- All three CI jobs passed at final `087f9b6`. Its four flash segments verified;
+  the OLED keyboard screenshot was viewed, preview/cancel kept TX at zero and
+  returned to the main menu without panic. Controlled two-way CLI exchange and
+  all eleven apps ×120 frames passed again; maximum app heap 32,872/49,152 bytes
+  and longest reported callback 4,592 us. Enhanced Chat GUI RF remains unverified;
+  it was restored after the valid CLI test. Earlier `d63f1ca` results are historical.
 
 See [Pocket UI](docs/POCKET_UI.md), [SD games](docs/SD_GAMES.md),
 [SD utilities](docs/SD_UTILITIES.md) and [test results](docs/TEST_REPORT.md).

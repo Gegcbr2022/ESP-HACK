@@ -78,7 +78,7 @@ history; BACK leaves chat. **Sent** confirms local transmission, without a peer
 ACK in plaintext mode. Physical reception still failed in both directions on
 the Russian `c5779ee` build. The connected Flipper was identified as Unleashed
 `unlshd-086e` (`e7e4e179`), with Enhanced Sub-Ghz Chat 1.2 in its SD backup.
-The earlier verified `d63f1ca` image passed controlled two-way plaintext exchange between
+The final `087f9b6` image passed controlled two-way plaintext exchange between
 the normal ESP32 chat UI and that Flipper's internal-radio CLI at nominal
 433.920 MHz, with this ESP32's saved +115 ppm correction. The Enhanced Chat
 GUI itself was not tested. Range, measured RF power and ESP ACK/FAP delivery
@@ -116,15 +116,17 @@ math/persistence 6,730,289. These use host adapters rather than physical radio.
 The visible keyboard model passed 1,460,550 checks under Zig/GCC, including
 GCC address/undefined-behavior sanitizer runs.
 All eleven Russian SD apps passed 120 diagnostic frames each on the final
-`d63f1ca` ESP32 image with radio starts disabled.
+`087f9b6` ESP32 image with radio starts disabled.
 The `e23c31d` diagnostic candidate was verified flashed and yielded the one-way
 RF evidence. All three CI jobs also passed at `28e4d46`, including full-path
 browsing and device calibration. All three CI jobs passed again at `d63f1ca`,
 including the carrier-gate correction. All four flash segments were verified;
 controlled two-way plaintext exchange with the installed Flipper CLI passed.
 This does not establish Enhanced Chat GUI interoperability or RF performance.
-The newer `087f9b6` keyboard source awaits its own device retest; the results
-above identify the earlier `d63f1ca` image.
+All three jobs also passed for the [final `087f9b6` keyboard source](https://github.com/Gegcbr2022/ESP-HACK/actions/runs/39486105314).
+Its OLED keyboard screenshot was viewed: grid, selected key, action cells,
+cursor and preview fit the screen. The `chatedit` preview kept TX at zero;
+closing it cancelled without panic and returned to the main menu.
 Exact source states and limits are in the [test report](docs/TEST_REPORT.md).
 
 Unrelated upstream applications remain available; their hardware behavior is

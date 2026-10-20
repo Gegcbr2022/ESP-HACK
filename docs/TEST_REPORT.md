@@ -12,9 +12,9 @@ carrier-gate change. The earlier verified `d63f1ca` image passed controlled two-
 plaintext exchange between the normal ESP32 chat UI and the installed
 Flipper's internal-radio CLI. Enhanced Chat's GUI itself was not tested;
 the result does not establish general RF performance or ESP ACK/FAP delivery.
-The later `087f9b6` source adds the visible keyboard. Its hardware keyboard,
-RF and eleven-app retest is pending; the `d63f1ca` device record below remains
-historical evidence for that identified image.
+The final `087f9b6` source adds the visible keyboard and passed a new physical
+OLED/preview-cancel, controlled two-way CLI RF and eleven-app test. The
+`d63f1ca` device record below remains historical evidence for that earlier image.
 
 ## Build results
 
@@ -28,7 +28,7 @@ historical evidence for that identified image.
 | Intermediate image `e23c31d` | Verified flashed; controlled one-way RX PASS | Valid-CRC Flipper-to-ESP32 packets at adjusted programmed RX frequency; final calibrated two-way exchange was not established by this test |
 | Source `28e4d46`: complete-path pagination, reference-clock probe, UART diagnostics and device calibration | PASS native / ESP32 / Flipper CI | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,605 flash bytes (86.3%); both target artifacts uploaded. Final device evidence is recorded separately |
 | Previously verified source `d63f1ca`: host carrier-gate correction | PASS native / ESP32 / Flipper CI and controlled device tests | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,629 flash bytes (86.3%); both target artifacts uploaded. Separately built device application 1,703,456 bytes, all four segments verified; normal-UI/Flipper-CLI plaintext exchange passed both directions, as detailed below |
-| Later source `087f9b6`: visible keyboard | PASS native / ESP32 / Flipper CI; device retest pending | Linux SH1106 build: 118,848 static RAM bytes, 1,699,365 flash bytes (86.4%); both target artifacts uploaded. 8 × 4 ASCII keys, field-specific alphabets and cancel preserving original output; the earlier `d63f1ca` RF/app result does not identify this image |
+| Final source `087f9b6`: visible keyboard | PASS native / ESP32 / Flipper CI and controlled device tests | Linux SH1106 build: 118,848 static RAM bytes, 1,699,365 flash bytes (86.4%); both target artifacts uploaded. Separately built device application 1,706,208 bytes, all four segments verified; viewed OLED keyboard/no-TX cancellation, two-way normal-UI/Flipper-CLI plaintext and eleven-app checks passed |
 | Companion Flipper chat FAP (previous checked source) | PASS | uFBT 0.2.6, official firmware/SDK 1.5.1, target 7 / API 88.2; actual `.fap` produced and strict import check passed |
 
 The official Flipper source reference is
@@ -166,8 +166,8 @@ The [visible-keyboard CI run](https://github.com/Gegcbr2022/ESP-HACK/actions/run
 passed **native, ESP32 SH1106 and Flipper** at exact source
 `087f9b68fd8f2242e26fdab1054e8d0e72b3134c`. Native output confirms 1,460,550
 keyboard-model and 2,429 actual editor/controller checks. Both target artifacts
-uploaded successfully. This run does not replace the pending physical
-keyboard/no-TX preview, RF and eleven-app retest of the new image.
+uploaded successfully. Physical keyboard/no-TX preview, controlled RF and
+eleven-app results for the matching new image are recorded separately below.
 The supplied firmware's manifest/SHA256 identifies its own Windows build;
 GitHub Actions builds independently on Linux.
 
@@ -233,6 +233,43 @@ valid-CRC packets, zero frequency-error estimate and persistence of the local
 +115 ppm NVS correction, without a panic. A separate carrier-busy host gate
 blocked ESP32 transmission under background carrier indication; `d63f1ca`
 changes that host gate; the final test below then passed both directions.
+
+### Final `087f9b6` device record
+
+The final application was 1,706,208 bytes, SHA256
+`8e14bc05f2c7ac5342035ddc9185c69ef376e270dc00e8968f0cf79772ba569a`.
+All four flashed segments passed explicit verification. This device's
++115 ppm correction persisted, and the busy-save guard remained effective.
+
+The captured OLED keyboard screenshot was viewed: 8 × 4 grid, selected-key
+highlight, action cells, cursor and text preview fit the 128 × 64 display.
+During the deferred `chatedit` preview, TX count stayed 0 before and after;
+`chatclose` cancelled with accepted=0, returned to the main menu and caused no
+panic. This confirms the diagnostic preview's no-send/cancel behavior on the
+device; the normal accepted-text send path retains its separate semantics.
+
+The normal ESP32 chat UI again received two controlled exact-text messages
+from the installed Flipper's internal-radio CLI at nominal 433.920 MHz. Both
+appeared in ESP32's last text; the receiver recorded three valid packets,
+zero CRC errors and FREQEST 0. Normal manual ESP32 `TEST123` produced TX count 1,
+and the Flipper CLI actually printed `ESP-HACK: TEST123`. This is observed
+two-way plaintext exchange on the new keyboard image, not an inference from
+local TX completion.
+
+An earlier attempt in this new test session was **invalid**: while Enhanced
+Chat's GUI was running, the Flipper CLI reported `failed to load external
+command`. That attempt is not counted as an RF test. The GUI was closed for
+the valid CLI exchange and the same FAP was restored afterward; private logs
+retain the failed attempt. Restoring the app does not test its GUI RF path.
+The valid CLI uses the exact installed `e7e4e179` firmware worker; **Enhanced
+Chat GUI RF itself remains unverified**.
+
+All **eleven installed Russian apps passed 120 diagnostic frames each** on
+this final image with radio starts disabled. Maximum reported allocation was
+32,872/49,152 bytes and longest reported callback 4,592 us. Range, external RF
+frequency/power calibration, RF edge jitter, encryption and ESP ACK/companion
+FAP delivery remain outside these results. See the device-operation and
+keyboard records for the retained evidence and narrower test conditions.
 
 ### Verified `d63f1ca` device record (historical)
 

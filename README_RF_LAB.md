@@ -116,22 +116,26 @@ The user confirmed failed reception in both ESP32/Flipper directions on the
 Russian `c5779ee` build. The connected peer is Unleashed `unlshd-086e`
 (`e7e4e179`); its backed-up Enhanced Sub-Ghz Chat 1.2 uses API 87.6 and delegates
 the radio worker to that firmware. Source/profile checks have not established
-the physical cause. The earlier verified `d63f1ca` image passed controlled plaintext
+the physical cause. The final `087f9b6` image passed controlled plaintext
 exchange in both directions between its normal chat UI and the installed
 Flipper's internal-radio CLI at nominal 433.920 MHz, with the ESP32's saved
 +115 ppm correction. Enhanced Chat's GUI itself was not tested. The supplied ESP ACK companion
 FAP built for official 1.5.1/API 88.2 is a separate application.
 
 All eleven Russian SD apps passed 120 diagnostic input/tick/draw frames each on
-the final `d63f1ca` ESP32 build with radio starts disabled. The earlier `c5779ee` CI run also
+the final `087f9b6` ESP32 build with radio starts disabled. The earlier `c5779ee` CI run also
 passed. The `e23c31d` diagnostic candidate was verified flashed and yielded the
 one-way RF result. All three CI jobs passed at `28e4d46`, including full-path
 browsing and per-device calibration. All three jobs also passed at `d63f1ca`,
 including its carrier-gate change. All four final flash segments verified and
 the controlled normal-UI/Flipper-CLI two-way test passed. Earlier
 release 1 evidence and exact source states are separated in the test report.
-The later `087f9b6` keyboard build awaits a new device test; `d63f1ca` RF/app
-results are historical evidence for the identified image.
+All three CI jobs also passed for the [final `087f9b6` keyboard build](https://github.com/Gegcbr2022/ESP-HACK/actions/runs/39486105314).
+All four final flash segments verified. Its viewed OLED screenshot showed the
+keyboard grid, highlight/actions, cursor and preview fitting 128 × 64. The USB
+editor preview kept TX at zero and cancelled to the main menu without panic.
+The repeated controlled two-way CLI and eleven-app tests passed on this image;
+`d63f1ca` is earlier historical evidence.
 
 ## Build, test, flash and rollback
 

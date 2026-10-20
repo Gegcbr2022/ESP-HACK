@@ -13,18 +13,19 @@ verified `e23c31d` image received controlled Flipper-to-ESP32 packets with valid
 CRC at an adjusted programmed receive frequency. This is one-way evidence,
 not a completed calibrated two-way test. All three CI jobs passed at
 `28e4d46` and `d63f1ca`, including the latter's host carrier-gate correction.
-The earlier verified `d63f1ca` image passed controlled two-way plaintext exchange between
+The final `087f9b6` image passed controlled two-way plaintext exchange between
 the normal ESP32 chat UI and the installed Flipper's internal-radio CLI at
 nominal 433.920 MHz, using this ESP32's persisted +115 ppm correction.
 Enhanced Chat's GUI, ESP ACK/FAP and general RF performance remain unverified.
-The later `087f9b6` source adds the visible keyboard; its physical keyboard,
-RF and eleven-app retest is pending, so the `d63f1ca` results remain historical.
+All three CI jobs also passed at `087f9b6`. Its four flash segments verified,
+OLED keyboard screenshot was viewed, no-TX preview/cancel passed, and all
+eleven apps passed 120 diagnostic frames each. Earlier `d63f1ca` evidence is historical.
 
 | Area | Implemented / compiled | Native validation | Physical status |
 |---|---|---|---|
 | Original source baseline | Original sources built with pinned compatible platform | Build logs retained | Baseline image not flashed |
 | Original GPIO / SH1106 target | Existing mapping retained; accidental NRF remapping removed | Source/build review | Release 1: user confirmed main-menu OLED and buttons; release 2 Pocket interaction pending |
-| CC1101 reset / SPI timeouts | Same3.0.2 driver, local bounded fixes, sticky faults, counters | Real driver under deterministic SPI mocks | Final `d63f1ca` boot: PART00 / VERSION14, zero SPI errors; controlled plaintext pair passed, sensitivity and timing remain unmeasured |
+| CC1101 reset / SPI timeouts | Same3.0.2 driver, local bounded fixes, sticky faults, counters | Real driver under deterministic SPI mocks | Historical `d63f1ca` boot: PART00 / VERSION14, zero SPI errors; controlled plaintext pair passed, sensitivity and timing remain unmeasured |
 | Legacy Standard Read | Correct first-frame packing, coherent rc-switch snapshot, no invalid512-entry scan | Packing/protocol guards tested | RF payload reception pending |
 | Legacy Read RAW | Interrupt ring replaces UI polling, post-burst RSSI issue fixed, damaged frames rejected | Real ISR code under GPIO/clock mocks | RF timing/drop rate/SD latency pending |
 | Exact AM270/AM650/FM238/FM476/FM12K | Pinned official1.5.1 register arrays | Exact bytes, arithmetic and boundaries | Receiver behavior pending |
@@ -42,15 +43,15 @@ RF and eleven-app retest is pending, so the `d63f1ca` results remain historical.
 | Modulation Explorer | Sequential four-preset RSSI/edge comparison | Preset/config tests | Physical comparison pending; no automatic identification claim |
 | Music Lab | RAW inspection and finite binary OOK RMT playback | Parser/staging/timing bounds | ESP→Flipper RAW reception/timing pending |
 | ESP ACK chat | Shared protocol,160 ASCII bytes,4fragments, ACK/retry/backoff/discovery/duplicates, retained in Advanced | C99/C++11 loss/duplicate/delay/reboot/wrap/bounds tests | Supplied companion FAP/ESP ACK physical exchange remains unverified; distinguish it from the user's Enhanced plaintext app |
-| Simple Flipper plaintext chat | Read/send screen, automatic 433.920 MHz / plaintext / nominal 0 dBm TX-ready setup for the authorized Faraday test; manual sends, finite governor and packet/CRC/FIFO/state diagnostics | 205,361 C99 checks and 205,361 C++11 checks on Windows/Linux; profile/carrier-gate suite 1,048,643 checks; editor/UART controller 2,429 checks | Historical `d63f1ca` normal UI ↔ installed Flipper internal-radio CLI controlled plaintext exchange PASS at nominal 433.920 MHz with local +115 ppm trim; Enhanced GUI itself untested; keyboard-build retest pending |
+| Simple Flipper plaintext chat | Read/send screen, automatic 433.920 MHz / plaintext / nominal 0 dBm TX-ready setup for the authorized Faraday test; manual sends, finite governor and packet/CRC/FIFO/state diagnostics | 205,361 C99 checks and 205,361 C++11 checks on Windows/Linux; profile/carrier-gate suite 1,048,643 checks; editor/UART controller 2,429 checks | Final `087f9b6` normal UI ↔ installed Flipper internal-radio CLI controlled plaintext exchange PASS at nominal 433.920 MHz with local +115 ppm trim; Enhanced GUI RF itself untested |
 | CC1101 reference-clock diagnostic | Finite idle-only GPIO4/PCNT probe, restores radio pin configuration and reports errors; no RF transmit | 246 checks of real probe under hardware mocks, including counter faults, timing and cleanup | Coarse reference-clock evidence is separate from fine RF accuracy; mocks do not measure the module |
 | Device-local frequency correction | Bounded signed-ppm correction, band-edge validation and NVS persistence; no global default offset | 6,730,289 arithmetic, persistence and guard checks | This unit's +115 ppm persisted across reset; busy save blocked; normal chat received valid CRC with zero FREQEST and controlled two-way CLI exchange passed; no external RF calibration |
 | Flipper FAP | Official1.5.1, API88.2, public exports, independent radio task | Shared protocol tests; actual strict FAP import check | Physical Flipper launch/UI/RF pending |
 | New OLED lab UI | Russian friendly receive/files/chat/settings home, with advanced tools and previous menu retained; keyboard, scrollable metadata, release guards | State helpers tested; no complete lab OLED/input simulator | Final normal chat send/receive and close-to-main path passed without panic; other workflows retain their separate pending status |
-| Visible text keyboard |8 × 4 keys, selected-key highlight, pages, tail/count, permitted field alphabets and safe cancel; normal accepted chat text queues, USB preview never sends | 1,460,550 production-model checks under Zig/GCC plus GCC ASan/UBSan; actual editor/UART 2,429 checks | `087f9b6` OLED/buttons and no-TX preview test pending; see [keyboard guide](KEYBOARD_RU.md) |
+| Visible text keyboard |8 × 4 keys, selected-key highlight, pages, tail/count, permitted field alphabets and safe cancel; normal accepted chat text queues, USB preview never sends | 1,460,550 production-model checks under Zig/GCC plus GCC ASan/UBSan; actual editor/UART 2,429 checks | Final `087f9b6` OLED screenshot viewed: grid/highlight/actions/cursor/preview fit; preview TX 0 before/after and cancel-to-main passed without panic; see [keyboard guide](KEYBOARD_RU.md) |
 | Pocket main menu / appearance | Default Pocket plus Pages, List, Wii and DSi; same eight categories, icons, counters, scrollbar, SD status and retained settings migration | 21,892 renderer/model/migration checks on Windows Zig and Ubuntu GCC | Release 2 physical OLED/button/style check pending |
 | Categorized SD launcher | All apps/Tools/Games/Radio/Favorites/Recent; bounded comment metadata, safe filenames, 32-entry catalog, eight favorites and four recent apps persisted on SD | 758,551 checks, including 10,000 metadata mutations and 10,000 preference operations, filters/path/scroll bounds | Release 2 SD persistence, app info and navigation pending |
-| SD Apps / Lua SDK | Bounded VM, Russian drawing/input/clock and receive-only radio bindings; eleven source apps, including four games and four new utilities | Actual Lua VM/sandbox: 91,990 host checks and 16,500 sample frames; meaningful game/math/timer fixtures | All eleven final `d63f1ca` apps PASS 120 diagnostic frames each with radio starts disabled; maximum app heap 32,872/49,152 bytes and longest reported callback 4,982 us |
+| SD Apps / Lua SDK | Bounded VM, Russian drawing/input/clock and receive-only radio bindings; eleven source apps, including four games and four new utilities | Actual Lua VM/sandbox: 91,990 host checks and 16,500 sample frames; meaningful game/math/timer fixtures | All eleven final `087f9b6` apps PASS 120 diagnostic frames each with radio starts disabled; maximum app heap 32,872/49,152 bytes and longest reported callback 4,592 us |
 | Backup / flash utility | Full host read + independent esptool full-flash MD5 verification and saved-file SHA256; optional two-host-read mode; identity/segment gates | Host utility guards tested / reviewed as reported | Connected 4 MiB dump and independent verification succeeded; interrupted second host dump is not counted |
 
 ## Explicit incomplete items
