@@ -115,18 +115,25 @@ a line/silence boundary. Text beyond 160 bytes is visibly marked
 ## USB diagnostics
 
 Send these newline-terminated commands through the firmware's existing USB
-serial connection. They do not send radio text.
+serial connection. Only the explicit `chatsend TEST123` command below requests
+a radio text send; opening chat and reading diagnostics remain silent.
 
 | Command | Behavior |
 |---|---|
-| `chatstat` | Prints a cached worker snapshot: active/connected state, format, frequency, TX permission and reason, RSSI, sync/rearm counts, packet/CRC/FIFO/SPI/MISO errors, message counters, last packet length/LQI, configured packet registers and last received text. It performs no SPI access. |
+| `chatopen` | From the idle main menu, opens the same automatic simple chat UI as the menu shortcut. It sends no text. |
+| `chatsend TEST123` | Requests one fixed TEST123 message through the normal UI history/queue path, only while the chat UI owns an active, connected chat worker. The existing TX permission, queue, deadline and airtime limits still apply. Arbitrary serial text sends are not supported. Queued does not mean transmitted or received by the peer. |
+| `chatclose` | Requests radio stop and exits the chat screen or its dialogs, restores the previous radio settings/profile, then returns to the main menu. |
+| `chatstat` | Prints a cached worker snapshot: active/connected state, format, frequency, TX permission and reason, RSSI, sync/rearm counts, packet/CRC/FIFO/SPI/MISO errors, message counters, last packet length/LQI, configured packet registers and last received text. For a completed packet it also reports appended packet RSSI, frequency error, and trailer CRC versus separately read status CRC/LQI captured before RX rearm. It performs no SPI access. |
 | `chatlisten plain433` | From the main menu with no active radio worker, starts a receive-only plaintext diagnostic at 433.920 MHz for at most 30 seconds. |
 | `chatlisten plain868` | Same bounded receive-only diagnostic at 868.350 MHz; the Flipper must be set to that frequency. This does not change simple chat's 433.920 MHz default. |
 | `chatstop` | Requests the current worker to stop. In the chat UI, exit and reopen chat to restart it. |
 | `screen` | Prints `SCREEN12864`, the cached 1024-byte monochrome OLED framebuffer as hexadecimal, then `ENDSCREEN`. It reads the UI buffer without a radio SPI operation or display refresh. |
 
-`chatstat`, `screen` and `chatstop` are accepted while the chat screen and its
-dialogs are open. A new `chatlisten` is rejected while another radio worker or
+`chatstat`, `screen`, `chatstop`, `chatclose` and the fixed `chatsend TEST123`
+are accepted while the chat screen and its dialogs are open. Sending is rejected
+once closing begins. `chatopen` is rejected from an existing chat or active
+diagnostic; `chatsend TEST123` is rejected at the main menu and during RX-only
+diagnostics. A new `chatlisten` is rejected while another radio worker or
 the chat UI owns the radio. On its normal timeout or stop, the diagnostic joins
 its worker before restoring legacy reception. Diagnostic TX is disabled even
 if the normal chat profile enables TX. It prints its start configuration,
@@ -139,6 +146,13 @@ for manual rejection instead of silently flushing them. Sync, CRC and FIFO
 counters can narrow a failure; a zero counter alone does not establish a radio
 fault or successful interoperability. Register values labeled configured are
 the applied configuration cache, not a fresh SPI register dump.
+
+For an explicit local UI/TX check, issue `chatopen`, wait until `chatstat`
+reports an active, connected worker, then issue `screen`. Issue
+`chatsend TEST123` once to request one message and inspect `chatstat`/`screen`
+again. Finish with `chatclose`; `[Chat] CLOSED; main menu restored` confirms
+that the synchronous UI wrapper has returned. Local completion still does not
+confirm Flipper reception.
 
 ## Validation status
 

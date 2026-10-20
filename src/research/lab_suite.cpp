@@ -14,6 +14,9 @@
 #include <string.h>
 #include <ctype.h>
 
+extern bool inMenu;
+void returnToMainMenu();
+
 namespace {
 using namespace research;
 RadioSettings settings;
@@ -34,7 +37,7 @@ char filter[32] = "";
 char notice[80] = "";
 uint32_t lastFrame;
 bool up, down, ok, back, holdOk, holdBack;
-bool serialChatContext, serialChatListen, serialChatReported;
+bool serialChatContext, serialChatListen, serialChatReported, serialChatCloseRequested;
 
 void printChatStatus() {
     const LabSnapshot s=labSnapshot();
@@ -64,6 +67,11 @@ void input() {
     up = buttonUp.isClick(); down = buttonDown.isClick();
     ok = buttonOK.isClick(); back = buttonBack.isClick();
     holdOk = buttonOK.isHolded(); holdBack = buttonBack.isHolded();
+    // A serial close unwinds the same nested chat dialogs as a held BACK.
+    // Suppress simultaneous selection so closing cannot queue another send.
+    if(serialChatContext && serialChatCloseRequested) {
+        up = down = ok = holdOk = false; back = holdBack = true;
+    }
     delay(2);
 }
 void resetInput() {
@@ -584,7 +592,7 @@ void chatApp(){
     settings=automaticSettings;radio=automatic;profile=TxProfile::ShieldedLab;powerIndex=1;chatFormat=ChatMode::FlipperPlaintext;
     const bool started=startMode(LabMode::Chat);
     if(started) {
-        serialChatContext=true;historySize=historyNext=0;
+        serialChatContext=true;serialChatCloseRequested=false;historySize=historyNext=0;
         uint16_t recipient=0;size_t selected=0,offset=0;bool queueError=false;resetInput();
         while(true) {
             input();uint16_t source;char received[161];
@@ -619,7 +627,7 @@ void chatApp(){
             }
         }
         while(!labStop()){showNotice("Waiting for chat radio stop");delay(10);}
-        serialChatContext=false;resetInput();
+        serialChatContext=false;serialChatCloseRequested=false;resetInput();
     }
     settings=savedSettings;radio=savedRadio;profile=savedProfile;powerIndex=savedPower;chatFormat=savedMode;
 }
@@ -716,6 +724,30 @@ void radioLabSerialPoll() {
             command[used]=0;
             const research::LabSnapshot s=research::labSnapshot();
             if(overflow)Serial.println("[Chat] ERROR command too long");
+            else if(!strcmp(command,"chatopen")) {
+                if(!inMenu || serialChatContext || serialChatListen || s.active)
+                    Serial.println("[Chat] ERROR busy; chatopen requires the idle main menu");
+                else {
+                    // chatApp polls this function again. Reset the shared line
+                    // state before entering it, and never resume this old frame.
+                    used=0;overflow=false;command[0]=0;
+                    Serial.println("[Chat] OPEN simple chat; no automatic text");
+                    inMenu=false;runSubGhzChat();returnToMainMenu();
+                    Serial.println("[Chat] CLOSED; main menu restored");
+                    return;
+                }
+            }
+            else if(!strcmp(command,"chatsend TEST123")) {
+                if(!serialChatContext || serialChatCloseRequested || !s.active || !s.connected ||
+                   s.mode!=research::LabMode::Chat || s.chatDiagnostic)
+                    Serial.println("[Chat] ERROR chatsend requires an active chat UI");
+                else if(simpleChatSend(0,"TEST123"))Serial.println("[Chat] queued TEST123; RF completion pending");
+                else Serial.printf("[Chat] ERROR not queued: %s\n",s.txBlockReason);
+            }
+            else if(!strcmp(command,"chatclose")) {
+                if(!serialChatContext)Serial.println("[Chat] ERROR no chat UI is open");
+                else {serialChatCloseRequested=true;research::labRequestStop();Serial.println("[Chat] close requested");}
+            }
             else if(!strcmp(command,"chatstat"))printChatStatus();
             else if(!strcmp(command,"screen")) {
                 const uint8_t* pixels=display.getBuffer();
@@ -744,11 +776,11 @@ void radioLabSerialPoll() {
                     if(!serialChatListen)restoreReceiveMode();
                 }
             }
-            else if((serialChatContext||s.active)&&used)Serial.println("[Chat] busy: use chatstat, screen or chatstop");
+            else if((serialChatContext||s.active)&&used)Serial.println("[Chat] busy: use chatstat, screen, chatsend TEST123, chatclose or chatstop");
             else if(handleAppInstallCommand(command)){}
             else if(!strcmp(command,"rfdiag"))radioLabBootDiagnostics();
             else if(!strcmp(command,"appsdiag"))sdAppsSelfTest();
-            else if(used)Serial.println("[RadioLab] commands: chatstat, chatlisten plain433/plain868, chatstop, screen, rfdiag, appsdiag, APP_PUT");
+            else if(used)Serial.println("[RadioLab] commands: chatopen, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868, chatstop, screen, rfdiag, appsdiag, APP_PUT");
             used=0;overflow=false;
         } else if(!overflow&&c>=32&&c<=126&&used+1<sizeof(command))command[used++]=c;
         else overflow=true;
