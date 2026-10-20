@@ -18,7 +18,7 @@ RadioSettings settings;
 RegisterImage radio;
 TxProfile profile = TxProfile::ReceiveOnly;
 uint8_t powerIndex = 0;
-ChatMode chatFormat = ChatMode::EspAck;
+ChatMode chatFormat = ChatMode::FlipperPlaintext;
 uint32_t sweepStep = 25000;
 int32_t waveform[kWaveformCapacity];
 size_t waveformCount;
@@ -522,7 +522,7 @@ void chatApp(){
 void runRadioLab() {
     using namespace research;
     suspendLegacyReceive();
-    settings=RadioSettings();settings.rxTimeoutMs=30000;selectPreset(0);profile=TxProfile::ReceiveOnly;powerIndex=0;chatFormat=ChatMode::EspAck;
+    settings=RadioSettings();settings.rxTimeoutMs=30000;selectPreset(0);profile=TxProfile::ReceiveOnly;powerIndex=0;chatFormat=ChatMode::FlipperPlaintext;
     SD.mkdir("/subghz");SD.mkdir("/subghz/presets");
     static const char* apps[]={"Read laboratory","Read RAW","Frequency Analyzer","Spectrum Analyzer","RAW Signal Analyzer","Protocol Analyzer","Signal Manager","Signal Generator","Radio Settings","Modulation Explorer","Sub-GHz Chat","Music Lab","CC1101 Diagnostics","About"};
     const size_t count=sizeof(apps)/sizeof(apps[0]);size_t selected=0;resetInput();
