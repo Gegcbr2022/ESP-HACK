@@ -46,13 +46,21 @@ int main() {
     // CRC-8/SMBUS independent known-answer vector: "123456789" has F4.
     // For this fixed two-byte payload, 0x1234 has CRC F1 (poly07/init00).
     CHECK(testCrc8(0x1234)==0xF1);
-    int32_t pulses[52];
-    for(unsigned i=0;i<52;++i) pulses[i]=0x12345678;
-    CHECK(!encodeLabOok(0x1234,pulses,49));
+    int32_t pulses[54];
+    for(unsigned i=0;i<54;++i) pulses[i]=0x12345678;
+    CHECK(!encodeLabOok(0x1234,pulses,51));
     CHECK(pulses[0]==0x12345678);
-    CHECK(encodeLabOok(0x1234,pulses,50)==50);
-    CHECK(pulses[50]==0x12345678 && pulses[51]==0x12345678);
+    CHECK(encodeLabOok(0x1234,pulses,52)==52);
+    CHECK(pulses[50]==300 && pulses[51]==-5000);
+    CHECK(pulses[52]==0x12345678 && pulses[53]==0x12345678);
     DecodedSignal decoded;
+    // Simulate only intervals ending in an actual edge. The final low guard
+    // merges with idle LOW and is not observed; all 50 data intervals survive.
+    int32_t observed[52]; size_t observedCount=0;
+    for(size_t i=0;i<52;++i)
+        if(i+1<52 || pulses[i]>0) observed[observedCount++]=pulses[i];
+    CHECK(observedCount==51); CHECK(decodeLabOok(observed,observedCount,decoded));
+    CHECK(decoded.payload==0x1234);
     CHECK(decodeLabOok(pulses,50,decoded)); CHECK(decoded.valid && decoded.payload==0x1234 && decoded.bits==24);
     CHECK(!decodeLabOok(pulses,49,decoded));
     CHECK(!decodeLabOok(0,50,decoded));
