@@ -18,7 +18,7 @@ logs are retained locally and are excluded from the public fork and release.
   ready timeouts, and AM270 asynchronous RX with MARCSTATE=0D. The SD card
   mounted and SH1106 UI initialization reached the main menu.
 
-## Final SDK build
+## Historical release 1 SDK build
 
 The final Lua SDK image was written and all four segments passed explicit
 esptool verification. The final image includes Flipper plaintext mode and
@@ -54,10 +54,47 @@ button coverage or physical RF measurements. UART communication stopped once
 after the reset/port sequence and recovered after the user reconnected USB;
 the successful sample checks were captured after that reconnection.
 
+## Release 2 connected-device checks
+
+At source `c5779ee`, all eleven Russian Lua sources were installed with matching
+closed-file SD readback SHA256 confirmations. The real ESP32 VM passed 120
+input/tick/draw frames per application. Its largest app memory peak was
+32,872 / 49,152 bytes; the longest observed callback was 6,085 us, within the
+draw-only 10,000 us budget. Logic callbacks retain their 5,000 us limit.
+
+Source `4d1fd3a` was written as four explicitly verified segments, preserving
+the NVS gap. Its application image was 1,694,528 bytes, SHA256
+`651fc599b70090dba9a004cdf9feb6f6b0fd0bec0bfe229f3d0879b09a648141`.
+After reset the SD mounted and the Russian Pocket menu was captured directly
+from the OLED framebuffer. The radio probe again reported PART00 / VERSION14
+and zero SPI/ready timeouts.
+
+A finite, IDLE-only XOSC/192 probe counted clock edges on GPIO4 and restored
+IOCFG0. The median estimate was 25,995,040 Hz, identifying a nominal 26 MHz
+module. This short gated count is not a ppm calibration or a measured carrier.
+
+Controlled USB tests then used the Flipper's internal radio at 433.920 MHz:
+
+- During a known synthetic Flipper OOK transmission, the ESP's receive-only
+  monitor measured a peak of -33 dBm versus approximately -84 dBm background.
+- The ESP transmitted six finite Princeton periods for the synthetic test
+  value A53A53 at nominal 0 dBm. The Flipper decoded that exact value twice,
+  with TE 389/390 us and guard factor30. This establishes that waveform's RF
+  reception; the ESP's 782 us wall-completion delta is not edge jitter.
+- Plain GFSK chat reception still failed: a controlled Flipper CLI send raised
+  ESP RSSI to -48 dBm, but no sync/CRC-valid packet was accepted. The following
+  USB-triggered ESP chat send hit a loopTask stack canary; that direction of
+  that attempt is invalid. Deferred serial UI dispatch was subsequently added
+  and requires the next device run.
+
+The attached Flipper identifies as Unleashed086e, commit `e7e4e179`. Its
+Enhanced Chat app uses the firmware's radio worker. This differs from the
+separately supplied official1.5.1/API88.2 companion FAP build target.
+
 ## Physical checks still needed
 
 Serial boot and register observations establish startup and bus access. They
 do not establish OLED appearance or all button workflows, RF waveform timing,
 receiver sensitivity, antenna matching, calibrated power, spectrum behavior,
-or bidirectional chat with a physical Flipper. Follow HARDWARE_VALIDATION.md
+or bidirectional chat with a physical Flipper beyond the finite OOK test above. Follow HARDWARE_VALIDATION.md
 with a known transmitter/receiver and measurement equipment for those checks.
