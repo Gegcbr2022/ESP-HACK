@@ -3,6 +3,7 @@
 #include "triggered_capture.h"
 #include "raw_startup_gate.h"
 #include <cstdio>
+#include <cstdarg>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
@@ -49,6 +50,15 @@ struct Driver {bool ready=true;bool spiReady()const{return ready;}}ELECHOUSE_cc1
 struct Pulse {int32_t duration;uint32_t ended;};
 static std::deque<Pulse> pending;
 static raw_capture::Snapshot raw;
+struct FakeSerial {
+    unsigned lines=0;std::string last;
+    size_t printf(const char* format,...) {
+        CHECK(!raw.running); // Diagnostics must never stall an active ISR ring.
+        char line[256];va_list args;va_start(args,format);
+        const int length=std::vsnprintf(line,sizeof(line),format,args);va_end(args);
+        CHECK(length>0&&size_t(length)<sizeof(line));last=line;++lines;return size_t(length);
+    }
+}Serial;
 static void queued(int32_t value,uint32_t ended){pending.push_back(Pulse{value,ended});raw.lastEdgeUs=ended;++raw.edges;}
 namespace research { namespace raw_capture {
 bool pop(int32_t& duration,uint32_t& ended){if(pending.empty())return false;duration=pending.front().duration;ended=pending.front().ended;pending.pop_front();return true;}
@@ -83,7 +93,7 @@ static void reset(){
     rawTraceBank=traceStorage;rawTrace.bind(traceStorage,kRawTraceCapacity);rawTrace.enable(true);
     workerHandle=nullptr;traceAllocations=traceFrees=0;failTraceAllocation=false;
     rawHistory.unbind();rawHistoryBank=nullptr;rawHistoryDuplicates=rawHistoryDiscarded=historyFrees=0;
-    activeRawHistory=historyCandidateStored=false;activeImage=RegisterImage();
+    activeRawHistory=historyCandidateStored=false;activeImage=RegisterImage();Serial.lines=0;Serial.last.clear();
 }
 static void prepareTriggered(TriggeredCapture& trigger){
     // The initial interval is partial;20 actual intervals follow the gate.
@@ -106,15 +116,16 @@ int main(){
     reset();state.rawThresholdAuto=true;delayUs=100000;CHECK(!prepareRawThreshold());CHECK(clockUs<700000&&!state.rawThresholdReady&&rssiSamples<64);
     reset();state.rawThresholdAuto=true;clockUs=UINT32_MAX-100000;CHECK(prepareRawThreshold());CHECK(state.rawThresholdReady&&state.rawThresholdSamples==64);
 
-    // Both the actual initial factory and actual restart preserve multi-frame
-    // history bursts across a Princeton guard; advanced remains7ms.
-    for(bool history:{false,true})for(bool restart:{false,true}) {
-        reset();activeRawHistory=history;
+    // Initial factory and restart preserve history/debug bursts across a
+    // Princeton guard; ordinary advanced single capture remains7ms.
+    for(unsigned mode=0;mode<3;++mode)for(bool restart:{false,true}) {
+        reset();if(mode!=2)CHECK(labRawTraceRelease());activeRawHistory=mode==1;
+        const bool grouped=mode!=0;
         TriggeredCapture configured=makeRawCandidate(0);
         if(restart)CHECK(restartRawCandidate(configured));
         prepareTriggered(configured);configured.poll(13100);
-        CHECK(configured.complete()==!history);
-        if(history) {
+        CHECK(configured.complete()==!grouped);
+        if(grouped) {
             configured.pulse(11700,17800);configured.pulse(-300,18100);
             configured.rssi(-60,18100);configured.poll(25100);
             CHECK(!configured.complete()&&configured.size()==22);
@@ -197,6 +208,8 @@ int main(){
     activeImage.set(0x0B,0x55);activeSettings.frequencyHz=433920000;state.peakDbm=-26;
     TriggeredCapture retained(capture,kWaveformCapacity,-75,0);prepareTriggered(retained);retained.poll(13100);CHECK(retained.complete());
     CHECK(!retainRawCandidate(retained,0,false));CHECK(state.captureHistoryCount==1&&historyCandidateStored);
+    CHECK(Serial.lines==1&&Serial.last.find("[CaptureDiag] c=1 full=0 n=20 post=20 q=1 drop=0 rej=0")!=std::string::npos);
+    CHECK(Serial.last.find("add=0 ok=1")!=std::string::npos);
     int32_t selected[2048]={};RegisterImage selectedImage;RadioSettings selectedSettings;
     workerHandle=historyStorage;CHECK(!labCopyCaptureHistory(0,selected,2048,selectedImage,selectedSettings));CHECK(!labClearCaptureHistory());workerHandle=nullptr;
     CHECK(!labCopyCaptureHistory(0,selected,19,selectedImage,selectedSettings));CHECK(!labCopyCaptureHistory(4,selected,2048,selectedImage,selectedSettings));
@@ -224,6 +237,7 @@ int main(){
     activeRawHistory=true;
     TriggeredCapture corrupt(capture,kWaveformCapacity,-75,0);prepareTriggered(corrupt);corrupt.pulse(0,6200);
     CHECK(!retainRawCandidate(corrupt,0,false));CHECK(state.captureHistoryCount==1&&state.captureHistoryDiscarded==2);
+    CHECK(Serial.lines==3&&Serial.last.find("c=0 full=0")!=std::string::npos&&Serial.last.find("add=-1 ok=0")!=std::string::npos);
     CHECK(rawHistory.pulses(0)[0]==300&&rawHistory.entry(0)->observations==2);
     for(unsigned slot=1;slot<4;++slot){
         TriggeredCapture next(capture,kWaveformCapacity,-75,0);prepareTriggered(next);next.poll(13100);
