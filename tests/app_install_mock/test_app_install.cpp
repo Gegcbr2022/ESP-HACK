@@ -13,7 +13,8 @@ static const char* backup="/apps/demo.lua.bak";
 static std::vector<uint8_t> bytes(const std::string& text){return std::vector<uint8_t>(text.begin(),text.end());}
 static std::string digest(const std::string& source) {
     uint8_t value[32];mockDigest(bytes(source),value);char text[65];
-    for(unsigned i=0;i<32;++i)snprintf(text+2*i,3,"%02x",value[i]);return text;
+    for(unsigned i=0;i<32;++i)snprintf(text+2*i,3,"%02x",value[i]);
+    return text;
 }
 static void reset(const std::string& source="abc",bool existing=true) {
     ++scenarios;mock=MockState();mock.input=source;mock.files["/apps"].directory=true;

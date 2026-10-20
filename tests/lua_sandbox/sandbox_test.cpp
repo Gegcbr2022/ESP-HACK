@@ -54,7 +54,8 @@ static int rect(lua_State* state) {
 }
 static int pixel(lua_State* state) {
     drawing(state); const int x=int(luaL_checkinteger(state,1)),y=int(luaL_checkinteger(state,2));
-    if(x<0||x>127||y<0||y>63) return luaL_error(state,"pixel outside screen"); return 0;
+    if(x<0||x>127||y<0||y>63) return luaL_error(state,"pixel outside screen");
+    return 0;
 }
 static int millis(lua_State* state) { lua_pushinteger(state,current->millis); return 1; }
 static int quit(lua_State*) { current->quit=true; return 0; }
