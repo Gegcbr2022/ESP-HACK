@@ -14,12 +14,14 @@ static unsigned checks;
 bool inMenu=true,serialChatContext=false,serialChatListen=false,serialChatReported=false;
 bool serialChatCloseRequested=false,serialChatOpenPending=false;
 bool serialChatEditPending=false,serialChatEditing=false;
+bool serialCaptureContext=false,serialCaptureOpenPending=false,serialCaptureSavePending=false,serialCaptureCloseRequested=false;
 ChatMode chatFormat=ChatMode::FlipperPlaintext;
 static LabSnapshot observed={};
 static unsigned pollDepth,maxDepth,uiCalls,sends,stops,restores,starts,history,diagnostics,stats,screens;
 static uint32_t startFrequency,startTimeout;static uint16_t sentDestination;
 static bool failStart;
 static unsigned editorCalls;static bool editorAccept=true;
+static unsigned captureCalls,captureStats;
 bool up,down,ok,back,holdOk,holdBack,holdUp,holdDown;
 enum { EUp=1,EDown=2,EOk=4,EBack=8,EHoldOk=16,EHoldBack=32,EHoldUp=64,EHoldDown=128 };
 static std::vector<unsigned> editorEvents;
@@ -62,9 +64,10 @@ namespace research {
 LabSnapshot labSnapshot(){return observed;}
 void labRequestStop(){++stops;observed.active=false;}
 bool labQueueText(const char* text,uint16_t destination){CHECK(std::strcmp(text,"TEST123")==0);++sends;sentDestination=destination;return true;}
-bool labStart(LabMode mode,const RegisterImage&,const RadioSettings& settings,TxProfile profile,uint8_t power,uint32_t step,ChatMode format,bool diagnostic){
+bool labStart(LabMode mode,const RegisterImage&,const RadioSettings& settings,TxProfile profile,uint8_t power,uint32_t step,ChatMode format,bool diagnostic,bool autoThreshold){
     CHECK(mode==LabMode::Chat&&profile==TxProfile::ReceiveOnly&&power==0&&step==25000);
     CHECK(format==ChatMode::FlipperPlaintext&&diagnostic);CHECK(settings.rxTimeoutMs==30000);
+    CHECK(!autoThreshold);
     ++starts;startFrequency=settings.frequencyHz;startTimeout=settings.rxTimeoutMs;
     observed.active=!failStart;observed.chatDiagnostic=!failStart;return !failStart;
 }
@@ -73,6 +76,7 @@ void suspendLegacyReceive(){}
 void restoreReceiveMode(){++restores;}
 void addHistory(uint16_t,bool sent,const char*){CHECK(sent);++history;}
 void printChatStatus(){++stats;}
+void printCaptureStatus(){++captureStats;}
 void printSerialScreen(){++screens;}
 void printSerialChatQueueFailure(){}
 bool pollSerialChatListen(){return true;}
@@ -80,6 +84,13 @@ bool handleIdleSerialCommand(const char*){++diagnostics;return true;}
 void radioLabSerialPoll();void radioLabHandlePending();
 static void runPoll(){++pollDepth;if(pollDepth>maxDepth)maxDepth=pollDepth;radioLabSerialPoll();--pollDepth;}
 void resetInput(){}
+void runSerialCaptureUi(){
+    CHECK(pollDepth==0&&!inMenu);++captureCalls;
+    serialCaptureContext=true;serialCaptureCloseRequested=serialCaptureSavePending=false;
+    observed.active=true;observed.mode=LabMode::Raw;
+    runPoll();CHECK(serialCaptureCloseRequested&&!observed.active&&!serialCaptureSavePending);
+    serialCaptureContext=false;serialCaptureCloseRequested=false;
+}
 bool textEntry(const char*,char* draft,size_t capacity){
     CHECK(pollDepth==0);CHECK(!serialChatEditing);CHECK(capacity==161&&draft[0]==0);++editorCalls;
     serialChatEditing=true;
@@ -168,5 +179,15 @@ int main(){
     char large[162]="unchanged";editorScript({});CHECK(!testedTextEntry("test",large,sizeof large));CHECK(!std::strcmp(large,"unchanged"));
     char unterminated[2]={'a','a'};CHECK(!testedTextEntry("test",unterminated,sizeof unterminated));CHECK(unterminated[0]=='a'&&unterminated[1]=='a');
     std::strcpy(draft.text,"a");CHECK(!testedTextEntry("test",draft.text,sizeof draft.text,"0123456789"));CHECK(!std::strcmp(draft.text,"a"));
+    serialChatContext=false;serialChatCloseRequested=false;observed={};inMenu=true;
+    const unsigned beforeCaptureSends=sends;
+    Serial.feed("captureopen\ncapturestat\ncapturesave\ncaptureclose\n");runPoll();
+    CHECK(serialCaptureOpenPending&&captureCalls==0);CHECK(Serial.available()>0);
+    radioLabHandlePending();CHECK(!serialCaptureOpenPending&&captureCalls==1&&captureStats==1&&inMenu);
+    CHECK(sends==beforeCaptureSends&&maxDepth==1);radioLabHandlePending();CHECK(captureCalls==1);
+    Serial.feed("capturesave\ncaptureclose\n");runPoll();CHECK(!serialCaptureSavePending&&!serialCaptureCloseRequested);
+    serialCaptureContext=true;Serial.feed("chatopen\ncaptureopen\n");runPoll();CHECK(!serialChatOpenPending&&!serialCaptureOpenPending);serialCaptureContext=false;
+    Serial.feed("captureopen\n");runPoll();CHECK(serialCaptureOpenPending);observed.active=true;
+    radioLabHandlePending();CHECK(!serialCaptureOpenPending&&captureCalls==1);observed.active=false;
     std::printf("Radio serial controller: %u checks passed (actual extracted functions, UART/UI/worker doubles)\n",checks);
 }

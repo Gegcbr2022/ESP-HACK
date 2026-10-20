@@ -17,6 +17,9 @@ static int32_t trim;
 static unsigned transmissions,resets,messages;
 static uint32_t expectedHz;static TxProfile expectedProfile;
 static bool transmitSuccess=true;
+static LabSnapshot captureState={};static bool stopSuccess=true,waveWrite=true,uniqueSuccess=true;
+static size_t captureCount=4;static unsigned savedCalls;
+char notice[80]="",captureSavedPath[112]="";
 static std::vector<unsigned> events;static size_t eventAt;
 static std::vector<std::string> rendered;
 enum { Cancel=1,HoldCancel=2,Transmit=4 };
@@ -28,8 +31,15 @@ void line(unsigned,const char* text){rendered.push_back(text);}
 void footer(const char*){}
 struct Display {void display(){}} display;
 void message(const char*,const char* text){++messages;rendered.push_back(text);}
+bool printPlaybackRadioState(const char*){return true;}
+void showNotice(const char* text){std::snprintf(notice,sizeof notice,"%s",text);}
+bool uniquePath(char* output,size_t capacity,const char* folder,const char* prefix){CHECK(!std::strcmp(folder,"/subghz")&&!std::strcmp(prefix,"LabRAW"));std::snprintf(output,capacity,"/subghz/LabRAW_0001.sub");return uniqueSuccess;}
+bool saveWave(const char* path){++savedCalls;CHECK(!std::strcmp(path,"/subghz/LabRAW_0001.sub"));CHECK(waveformCount==captureCount);return waveWrite;}
 namespace research {
 int32_t radioCalibrationPpm(){return trim;}
+bool labStop(){return stopSuccess;}
+LabSnapshot labSnapshot(){return captureState;}
+size_t labCopyPulses(int32_t* output,size_t capacity){CHECK(output==waveform&&capacity==kWaveformCapacity);for(size_t i=0;i<captureCount;++i)output[i]=i%2?-100:100;return captureCount;}
 bool labTransmitRaw(const int32_t* pulses,size_t count,const RegisterImage& image,uint32_t hz,TxProfile tx,uint8_t power,uint32_t limit,uint32_t& elapsed,int32_t& timing){
     ++transmissions;CHECK(hz==expectedHz);CHECK(tx==TxProfile::FilePlayback);CHECK(power==1&&limit==5000);
     CHECK(count>0&&count<=kWaveformCapacity&&pulses==waveform);CHECK(image.paPresent);
@@ -85,5 +95,25 @@ int main(){
     for(uint32_t value:valid){const std::string command="rftest princeton "+std::to_string(value);CHECK(serialPrincetonTestFrequency(command.c_str(),hz)&&hz==value);}
     const char* invalid[]={nullptr,"rftest princeton","rftest princeton ","rftest princeton +906400000","rftest princeton -1","rftest princeton 906400000 ","rftest princeton 906400000x","rftest princeton 4294967296","rftest princeton 99999999999999999999","rftest princeton 348000001","rftest princeton 500000000","rftest princeton 928000001","rftest princeton433x","rftest unknown 433920000"};
     for(const char* command:invalid){hz=99;CHECK(!serialPrincetonTestFrequency(command,hz));CHECK(hz==99);}
+    const unsigned beforeSaves=savedCalls;
+    stopSuccess=false;CHECK(!saveCapture());CHECK(!std::strcmp(notice,"Radio still active"));stopSuccess=true;
+    CHECK(!saveCapture());captureState.captureTriggered=true;CHECK(!saveCapture());captureState.captureComplete=true;
+    captureState.dropped=1;CHECK(!saveCapture());captureState.dropped=0;captureState.rejected=1;CHECK(!saveCapture());captureState.rejected=0;
+    captureState.captureFull=true;CHECK(!saveCapture());captureState.captureFull=false;CHECK(savedCalls==beforeSaves);
+    captureCount=0;CHECK(!saveCapture());CHECK(!std::strcmp(notice,"No pulses captured"));captureCount=4;
+    uniqueSuccess=false;CHECK(!saveCapture());CHECK(savedCalls==beforeSaves);uniqueSuccess=true;
+    waveWrite=false;CHECK(!saveCapture());CHECK(!std::strcmp(notice,"SD save failed"));waveWrite=true;
+    CHECK(saveCapture());CHECK(!std::strcmp(captureSavedPath,"/subghz/LabRAW_0001.sub"));CHECK(savedCalls==beforeSaves+2);
+    LabSnapshot visual={};visual.active=visual.connected=true;
+    CHECK(!std::strcmp(captureProgressText(visual),"Настройка по шуму..."));visual.rawThresholdReady=true;
+    CHECK(!std::strcmp(captureProgressText(visual),"Ждём кнопку пульта"));visual.captureTriggered=true;
+    CHECK(!std::strcmp(captureProgressText(visual),"Запись сигнала..."));visual.captureComplete=true;
+    CHECK(!std::strcmp(captureProgressText(visual),"Принято: OK записать"));visual.captureFull=true;
+    CHECK(!std::strcmp(captureProgressText(visual),"Сигнал длиннее лимита"));visual.captureFull=false;visual.dropped=1;
+    CHECK(!std::strcmp(captureProgressText(visual),"Помеха: повтор приёма"));visual.dropped=0;visual.rejected=1;
+    CHECK(!std::strcmp(captureProgressText(visual),"Помеха: повтор приёма"));visual.rejected=0;visual.captureComplete=false;visual.active=false;
+    CHECK(!std::strcmp(captureProgressText(visual),"Приём окончен: повтор"));visual.rawThresholdReady=false;
+    CHECK(!std::strcmp(captureProgressText(visual),"Ошибка приёма: назад"));visual.rawThresholdReady=true;visual.connected=false;
+    CHECK(!std::strcmp(captureProgressText(visual),"Ошибка приёма: назад"));
     std::printf("File send UI: %u checks passed (actual extracted flow, production codecs, mocked radio)\n",checks);
 }
