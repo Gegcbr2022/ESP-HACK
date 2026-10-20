@@ -736,7 +736,7 @@ void loop() {
         displayBluetoothMenu(display, bluetoothMenuIndex);
       } else if (currentMenu == 2) {
         inMenu = false;
-        runSubGHz();
+        runRadioLab();
         returnToMainMenu();
       } else if (currentMenu == 3) {
         irMenuIndex = 0;

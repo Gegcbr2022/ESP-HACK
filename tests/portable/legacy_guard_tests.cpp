@@ -60,6 +60,6 @@ int main() {
     CHECK(!research::legacyDecodedPlan(info, plan));
     strcpy(info.protocol, "CAME");
     info.teUs = 270;
-    CHECK(research::legacyDecodedPlan(info, plan) && plan.protocol == 11);
+    CHECK(!research::legacyDecodedPlan(info, plan)); // rc-switch11 is HT12E, not CAME.
     puts("legacy guard: first/changed key length packing, exact OOK presets, rejection, payload/timing bounds passed");
 }

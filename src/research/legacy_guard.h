@@ -32,7 +32,7 @@ inline bool legacyOokFile(const SubInfo& info, const char** error = nullptr) {
     return true;
 }
 
-// Preserve the legacy protocol-1 and protocol-11 encoders only. Never fall back
+// Preserve the legacy protocol-1 encoder only. Never fall back
 // to a guessed preset or protocol. RAW goes to the bounded Radio Lab/RMT path.
 inline bool legacyDecodedPlan(const SubInfo& info, LegacyDecodedPlan& plan,
                               const char** error = nullptr) {
@@ -44,7 +44,6 @@ inline bool legacyDecodedPlan(const SubInfo& info, LegacyDecodedPlan& plan,
     }
     uint8_t protocol;
     if (!strcmp(info.protocol, "Princeton") || !strcmp(info.protocol, "RcSwitch")) protocol = 1;
-    else if (!strcmp(info.protocol, "CAME")) protocol = 11;
     else {
         if (error) *error = "Protocol has no supported legacy encoder";
         return false;
@@ -64,7 +63,7 @@ inline bool legacyDecodedPlan(const SubInfo& info, LegacyDecodedPlan& plan,
         return false;
     }
     const uint8_t repeats = 6; // Same cap as the existing RCSwitch_send wrapper.
-    const uint32_t factors = protocol == 1 ? 4U * info.bits + 32U : 3U * info.bits + 37U;
+    const uint32_t factors = 4U * info.bits + 32U;
     // Exact configured delay sum plus a conservative GPIO/scheduling margin.
     // This bounds parameters; physical completion time still needs measurement.
     const uint64_t boundUs = uint64_t(factors) * info.teUs * repeats +

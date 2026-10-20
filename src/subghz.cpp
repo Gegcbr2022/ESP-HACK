@@ -1004,8 +1004,9 @@ void read_rcswitch(tpKeyData* kd) {
   kd->codeLenth = bitLength;
   if (!research::packLegacyDecodedKey(decoded, bitLength, kd->keyID)) return;
   ++signals;
-  kd->type = (protocol == 1 && bitLength == 24) ? kPrinceton : kRcSwitch;
-  if (protocol == 11 && bitLength <= 32) kd->type = kCAME;
+  // An rc-switch protocol ID is not a Flipper protocol identity. In particular,
+  // rc-switch11 is HT12E and must never be saved/replayed as CAME.
+  kd->type = protocol==1 ? (bitLength==24?kPrinceton:kRcSwitch) : kUnknown;
   kd->te = pulseDelay;
   strcpy(kd->preset, "AM270");
   // No truncated raw preview: decoded messages retain their key/TE metadata.
@@ -2129,8 +2130,11 @@ void sendSynthKey(tpKeyData* kd) {
   if (!inspectLegacySubFile(path, info)) {
     OLED_printError(legacyFileLoadError, true); delay(1000); return;
   }
-  if (info.kind == research::SubKind::Raw) {
-    playRawRecorderFile(path);
+  if (info.kind == research::SubKind::Raw || !strcmp(info.protocol,"Princeton") || !strcmp(info.protocol,"CAME")) {
+    suspendLegacyReceive();
+    runRadioLabFile(path.c_str());
+    restoreReceiveMode();
+    armRawPlaybackReleaseGuards();
     OLED_printKey(kd, subExplorer.selectedFile);
     return;
   }
