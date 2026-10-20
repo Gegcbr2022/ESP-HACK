@@ -7,6 +7,8 @@
 #include <esp_heap_caps.h>
 #include <ctype.h>
 
+void returnToMainMenu();
+
 namespace {
 using research::LuaSandbox;
 struct Runtime {
@@ -279,7 +281,8 @@ void sdAppsSelfTest() {
                   smokeGood && quotaGood ? "PASS" : "FAIL", LUA_RELEASE, unsigned(vm.peak()),
                   unsigned(LuaSandbox::kHeapBytes), static_cast<unsigned long>(LuaSandbox::kInstructions), static_cast<unsigned long>(LuaSandbox::kWallUs));
     vm.close(); activeApp = nullptr; stopOwnedRadio(runtime);
-    const char* samples[] = {"hello.lua", "stopwatch.lua", "rf_dashboard.lua"};
+    const char* samples[] = {"hello.lua", "stopwatch.lua", "rf_dashboard.lua", "snake.lua", "game2048.lua"};
     for(size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) sampleSelfTest(samples[i], bank);
     free(bank);
+    returnToMainMenu();
 }
