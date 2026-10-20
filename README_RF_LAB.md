@@ -47,11 +47,16 @@ receive-only radio measurements within bounded memory and callback budgets.
   validation/metadata, rename, move, duplicate/export and explicit deletion.
   Each page holds 39 real paths plus a separate **След. страница** row when
   more entries exist. BACK returns to the previous page before the parent
-  folder. Search and folder changes reset the page. Paths over 111 bytes are
-  visibly reported and omitted; complete UTF-8 names are never byte-truncated.
+  folder. Hold DOWN/UP to change pages quickly; page and total counts appear
+  in the header. Search and folder changes reset the page. Full paths up to
+  1023 bytes are resolved from directory identities, with no full-path bank
+  per row. Longer paths are visibly refused; UTF-8 names are never truncated
+  for opening. Legacy Send uses the same browser.
 - **File Send:** **Радио SubGHz → Файлы .sub → file → Отправить** supports
   one binary OOK RAW pass (starts HIGH, at most 2048 intervals / 5 seconds),
-  Princeton24 or CAME12/24 (six periods). Exact file frequency and compatible
+  exact `RcSwitch` protocol 1 or `Princeton` at 1..32 bits, or CAME 12/24 (six periods).
+  Non-24 Princeton is an ESP-HACK legacy extension, not official Flipper support.
+  Exact file frequency and compatible
   OOK configuration are required; unsupported or dynamic protocols are refused.
   CAME's initial LOW is rotated to the period end for finite HIGH-first RMT
   playback. See [supported static playback](docs/STATIC_SUB_PLAYBACK.md).
@@ -107,13 +112,17 @@ The user confirmed failed reception in both ESP32/Flipper directions on the
 Russian `c5779ee` build. The connected peer is Unleashed `unlshd-086e`
 (`e7e4e179`); its backed-up Enhanced Sub-Ghz Chat 1.2 uses API 87.6 and delegates
 the radio worker to that firmware. Source/profile checks have not established
-the physical cause or a successful exchange. The supplied ESP ACK companion
+the physical cause. Later controlled valid-CRC one-way reception required a
+device-specific frequency offset; calibrated bidirectional delivery remains
+pending. The supplied ESP ACK companion
 FAP built for official 1.5.1/API 88.2 is a separate application.
 
 All eleven Russian SD apps passed 120 diagnostic input/tick/draw frames each on
 the `c5779ee` ESP32 build with radio starts disabled. Its three-job CI run also
-passed. The later `4d1fd3a` candidate adds file pagination and finite USB RF
-diagnostics; its final flash/probe and physical results remain pending. Earlier
+passed. The `e23c31d` diagnostic candidate was verified flashed and yielded the
+one-way RF result. All three CI jobs passed at `28e4d46`, including full-path
+browsing and per-device calibration. The later `d63f1ca` carrier-gate change
+awaits final CI and bidirectional device results. Earlier
 release 1 evidence and exact source states are separated in the test report.
 
 ## Build, test, flash and rollback
@@ -138,8 +147,11 @@ Release 2 native checks pass on Windows Zig and Ubuntu GCC: 91,990 Lua checks
 with 16,500 sample frames across eleven apps, 758,551 catalog checks and 21,892
 menu/rendering/migration checks. These results cover software behavior and
 bounds; they do not establish physical OLED/button usability or RF performance.
-Additional suites passed 800,843 static encoder checks, 1,069,109 pagination
-checks, 61 automatic chat profile checks and 246 mock clock probe checks.
+Additional suites passed 1,066,348 static encoder checks, 1,108,737 pagination
+checks, 1,048,643 automatic chat profile/carrier-gate checks and 246 mock clock probe checks.
+Actual-browser, UART-dispatch and calibration suites passed 5,026, 1,489 and
+6,730,289 checks respectively; calibration mocks do not establish a measured
+correction for every module.
 Basic settings and new screens use Russian; remaining advanced legacy screens
 may retain English labels. Filenames and protocol identifiers are not translated.
 

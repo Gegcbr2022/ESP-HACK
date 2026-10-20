@@ -17,10 +17,13 @@ README is preserved in [README_UPSTREAM.md](README_UPSTREAM.md).
 - Exact official Flipper1.5.1 AM270/AM650/FM238/FM476/FM12K presets, validated
   advanced settings and streaming `.sub` import/export with explicit errors.
 - File Send supports one bounded binary OOK RAW pass or six periods of
-  Princeton24 / CAME12/24. Dynamic protocols such as KeeLoq, Alutech and
+  RcSwitch (protocol 1, 1..32 bits) / Princeton 1..32 / CAME 12/24. Dynamic protocols such as KeeLoq, Alutech and
   StarLine remain inspection-only; unsupported files are refused explicitly.
+  Non-24 Princeton is an ESP-HACK legacy-input extension, while official
+  Flipper Princeton remains 24-bit. Protocol names are matched exactly.
   Radio files use pages of 39 paths plus a separate Next Page row, preserving
-  complete paths rather than silently truncating them.
+  complete paths up to 1023 bytes. The header shows page/total counts;
+  holding DOWN/UP changes pages quickly and BACK returns to the previous page.
 - Radio Lab: receive, frequency/spectrum/RAW/protocol analysis, file and preset
   management, finite laboratory generator, Music Lab and detailed diagnostics.
 - Russian Pocket menus, basic settings labels, button hints and all eleven SD
@@ -75,14 +78,16 @@ history; BACK leaves chat. **Sent** confirms local transmission, without a peer
 ACK in plaintext mode. Physical reception still failed in both directions on
 the Russian `c5779ee` build. The connected Flipper was identified as Unleashed
 `unlshd-086e` (`e7e4e179`), with Enhanced Sub-Ghz Chat 1.2 in its SD backup.
-Successful interoperability remains unresolved.
+A later controlled one-way test received valid-CRC Flipper packets after a
+device-specific frequency offset was applied. Calibrated bidirectional chat
+still requires final validation; see the test report.
 
 ## Validation boundaries
 
 The release includes actual ESP32/FAP binaries and portable/mock test results.
 Compilation, a successful device flash and a CC1101 register probe do not prove
 RF sensitivity, timing, spectral compliance or Flipper interoperability. The
-test report separates observed results from pending physical tests. Other
+test report separates observed results from pending physical tests.
 The simple Chat and file Send screens temporarily apply the authorized Faraday
 profile at nominal 0 dBm, then restore previous settings. Both require a manual
 send action. File Send requires a fresh hold OK, preserves the exact file
@@ -95,12 +100,16 @@ a regional certification or measured RF power.
 
 Release 2 native tests pass under Windows Zig and Ubuntu GCC: 91,990 Lua checks
 with 16,500 app frames, 758,551 catalog checks and 21,892 menu/migration checks.
-Static encoders passed 800,843 checks; pagination passed 1,069,109 checks; the
-automatic chat profile passed 61 checks and the mock clock probe passed 246.
+Static encoders passed 1,066,348 checks; pagination passed 1,108,737 checks; the
+automatic chat profile/carrier gate passed 1,048,643 checks and the mock clock probe passed 246.
+The actual browser passed 5,026 checks, UART dispatch 1,489 and calibration
+math/persistence 6,730,289. These use host adapters rather than physical radio.
 The `c5779ee` CI run passed all three jobs, and all eleven Russian SD apps
 passed 120 diagnostic frames each on ESP32 with radio starts disabled.
-The later `4d1fd3a` candidate adds pagination and finite USB RF diagnostics;
-its final flash/probe and physical tests await the release owner's record.
+The `e23c31d` diagnostic candidate was verified flashed and yielded the one-way
+RF evidence. All three CI jobs also passed at `28e4d46`, including full-path
+browsing and device calibration. The later `d63f1ca` carrier-gate correction
+awaits final CI and bidirectional device checks.
 Exact source states and limits are in the [test report](docs/TEST_REPORT.md).
 
 Unrelated upstream applications remain available; their hardware behavior is

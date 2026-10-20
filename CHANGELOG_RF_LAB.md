@@ -9,10 +9,14 @@
 - Opened the simple radio home directly from **Радио SubGHz**, with the old
   radio menu and technical tools under **Дополнительно**.
 - Added file pages of 39 actual paths plus a separate Next Page row, previous
-  page navigation and complete-path checks; overlong paths are reported.
+  page navigation, hold-UP/DOWN page shortcuts and visible page/total counts.
+  Full names resolve from lightweight directory identities into one selected
+  path bank up to 1023 bytes; legacy Send uses the same browser.
 - Added manual file Send for one binary OOK RAW pass or six periods of
-  Princeton24 / CAME12/24, preserving exact supported file frequency and modem
+  RcSwitch (protocol 1, 1..32 bits) / Princeton 1..32 / CAME 12/24, preserving exact supported file frequency and modem
   settings. CAME's leading LOW is explicitly rotated to the period end.
+  Non-24 Princeton is a documented ESP-HACK legacy-input extension; protocol
+  aliases are not guessed and official Flipper Princeton remains 24-bit.
   Dynamic protocols remain inspection-only; unsupported requests are refused.
 - Added a categorized SD launcher with All apps, Tools, Games, Radio, Favorites
   and Recent sections, bounded comment metadata, descriptions, eight favorites
@@ -31,8 +35,9 @@
   No encryption. ESP ACK mode and its companion FAP remain under Advanced.
 - Added clearer chat state/blocking reasons and packet/CRC/FIFO/state
   diagnostics for reproducing the user's failures in both RF directions.
-  Both RF directions still failed on the Russian `c5779ee` build. Successful
-  physical delivery remains unresolved; local Sent is not a peer
+  Both RF directions failed on the Russian `c5779ee` build; later controlled
+  one-way valid-CRC reception required a device-local frequency correction.
+  Calibrated bidirectional delivery remains pending; local Sent is not a peer
   acknowledgement in plaintext mode. Finite TX governors remain active.
 - Expanded `appsdiag` to all eleven installed examples, up to 120 input/tick/draw
   frames per app with radio start disabled, followed by return to the main menu.
@@ -43,11 +48,17 @@
   Game tests now release prior host-only assertion chunks before compiling
   another; twenty independent GCC runs passed without changing production
   memory limits or the normal-GC app frame tests.
-- Passed 800,843 static encoder, 1,069,109 pagination, 61 automatic chat profile
+- Passed 1,066,348 static encoder, 1,108,737 pagination, 1,048,643 chat profile/carrier-gate
   and 246 mock clock probe checks. Added finite idle-only USB clock diagnostics;
   mock tests do not establish the installed module's crystal frequency.
-- All three CI jobs passed at `c5779ee`. Later candidate `4d1fd3a` adds pagination
-  and USB RF/file diagnostics; final device results await the release owner.
+- Actual-browser, UART-dispatch and calibration math/persistence suites passed
+  5,026, 1,489 and 6,730,289 checks. Device frequency trim is stored locally;
+  other modules keep their own settings rather than inheriting this unit's trim.
+- All three CI jobs passed at `c5779ee`. The verified-flashed `e23c31d`
+  diagnostic candidate received valid-CRC Flipper packets at an adjusted
+  programmed RX frequency. All three CI jobs also passed at `28e4d46`, including
+  full-path browsing and device calibration. The later `d63f1ca` host carrier
+  gate uses cached RSSI/sync state; final CI and two-way device results remain pending.
 
 See [Pocket UI](docs/POCKET_UI.md), [SD games](docs/SD_GAMES.md),
 [SD utilities](docs/SD_UTILITIES.md) and [test results](docs/TEST_REPORT.md).

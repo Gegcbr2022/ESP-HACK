@@ -8,10 +8,12 @@ in the release's device-operation report, not generalized to all features.
 Release 1 hardware results below are historical. The Russian `c5779ee` build
 passed its three-job CI run and all eleven installed SD apps passed 120
 diagnostic frames each on ESP32, with radio starts disabled. The user confirmed
-that physical chat still failed in both directions on that build. The later
-`4d1fd3a` candidate adds pagination and finite USB diagnostics; final flash/probe
-and physical results are pending. Prior results do not identify that candidate
-or establish RF interoperability.
+that physical chat still failed in both directions on that build. A later
+verified `e23c31d` image received controlled Flipper-to-ESP32 packets with valid
+CRC at an adjusted programmed receive frequency. This is one-way evidence,
+not a completed calibrated two-way test. All three CI jobs passed at
+`28e4d46`. The later `d63f1ca` host carrier-gate correction awaits its own CI
+and final bidirectional device record.
 
 | Area | Implemented / compiled | Native validation | Physical status |
 |---|---|---|---|
@@ -28,17 +30,18 @@ or establish RF interoperability.
 | Frequency Analyzer | Current/peak RSSI, carrier/activity indication, CSV | No RF mock for RSSI values | Frequency/RSSI calibration pending |
 | Spectrum Analyzer |64 sequential bins, step choices, graph, peak hold, CSV | Channel bounds/parameter checks | Settling time and measured peaks pending |
 | RAW Analyzer | Count/duration/min/max/gaps and pulse-index view | Statistics/decoder tests | Visual usability pending |
-| Signal Manager |39 real paths per page plus a separate Next Page row; BACK previous page, folder/search reset, complete paths and visible overlong-path refusal; metadata/rename/move/duplicate/delete | 1,069,109 pagination/path checks, directory sizes 0–1000, deletion clamp and UTF-8 byte boundaries | New paginated FAT/SD/button workflow pending on `4d1fd3a` |
-| Static `.sub` Send | Princeton24 / CAME12/24, six periods; exact file frequency and binary OOK config, manual hold OK, finite RMT; CAME LOW-header rotation disclosed | 800,843 encoder/parser/config checks, period decoding and bounds | Physical waveform/reception pending; KeeLoq/Alutech/StarLine and other dynamic protocols have no encoder |
+| Signal Manager |39 lightweight directory identities per page plus a separate Next Page row; page/total header, hold DOWN/UP for pages, BACK previous page before parent; complete UTF-8 paths up to 1023 bytes; metadata/rename/move/duplicate/delete | 1,108,737 pagination/path checks plus 5,026 actual-browser mock checks; directory sizes 0–1000, stale identities, long names and page bounds | Final FAT/SD/button workflow pending on the latest image |
+| Static `.sub` Send | RcSwitch (protocol 1, 1..32 bits) / Princeton 1..32 / CAME 12/24, six periods; exact file frequency and binary OOK config, manual hold OK, finite RMT; CAME LOW-header rotation disclosed | 1,066,348 encoder/parser/config checks, period decoding and bounds | Physical waveform/reception pending; KeeLoq/Alutech/StarLine and other dynamic protocols have no encoder |
 | Simple RAW file Send | One HIGH-first binary OOK RAW pass, at most 2048 intervals / 5 seconds; temporary lab profile / nominal 0 dBm restored after send/cancel | Parser/staging/config/time bounds; unsupported presets, shaping and FSK refused | Physical reproduction and reception pending |
 | Signal Generator | Finite user LAB-OOK24 payload,52 intervals including terminator | Known payload/CRC, receiver-edge simulation | Actual waveform/RMT jitter pending |
 | Modulation Explorer | Sequential four-preset RSSI/edge comparison | Preset/config tests | Physical comparison pending; no automatic identification claim |
 | Music Lab | RAW inspection and finite binary OOK RMT playback | Parser/staging/timing bounds | ESP→Flipper RAW reception/timing pending |
 | ESP ACK chat | Shared protocol,160 ASCII bytes,4fragments, ACK/retry/backoff/discovery/duplicates, retained in Advanced | C99/C++11 loss/duplicate/delay/reboot/wrap/bounds tests | Supplied companion FAP/ESP ACK physical exchange remains unverified; distinguish it from the user's Enhanced plaintext app |
-| Simple Flipper plaintext chat | Read/send screen, automatic 433.920 MHz / plaintext / nominal 0 dBm TX-ready setup for the authorized Faraday test; manual sends, finite governor and packet/CRC/FIFO/state diagnostics | 205,361 C99 checks and 205,361 C++11 checks on Windows/Linux; separate automatic-profile suite 61 checks | BOTH directions still failed on `c5779ee`; connected peer is Unleashed086e/e7e4e179, Enhanced1.2/API87.6 backup; no successful physical exchange established |
-| CC1101 reference-clock diagnostic | Finite idle-only GPIO4/PCNT probe, restores radio pin configuration and reports errors; no RF transmit | 246 checks of real probe under hardware mocks, including counter faults, timing and cleanup | `4d1fd3a` actual-module probe pending; 26 MHz remains an assumption until measured |
+| Simple Flipper plaintext chat | Read/send screen, automatic 433.920 MHz / plaintext / nominal 0 dBm TX-ready setup for the authorized Faraday test; manual sends, finite governor and packet/CRC/FIFO/state diagnostics | 205,361 C99 checks and 205,361 C++11 checks on Windows/Linux; profile/carrier-gate suite 1,048,643 checks; idle UART dispatcher 1,489 checks | BOTH directions failed on `c5779ee`; later verified `e23c31d` received controlled valid-CRC Flipper packets at an adjusted programmed RX frequency; calibrated two-way exchange pending |
+| CC1101 reference-clock diagnostic | Finite idle-only GPIO4/PCNT probe, restores radio pin configuration and reports errors; no RF transmit | 246 checks of real probe under hardware mocks, including counter faults, timing and cleanup | Coarse reference-clock evidence is separate from fine RF accuracy; mocks do not measure the module |
+| Device-local frequency correction | Bounded signed-ppm correction, band-edge validation and NVS persistence; no global default offset | 6,730,289 arithmetic, persistence and guard checks | Controlled one-way RX offset observed; final saved-correction readback and two-way test pending |
 | Flipper FAP | Official1.5.1, API88.2, public exports, independent radio task | Shared protocol tests; actual strict FAP import check | Physical Flipper launch/UI/RF pending |
-| New OLED lab UI | Russian friendly receive/files/chat/settings home, with advanced tools and previous menu retained; keyboard, scrollable metadata, release guards | State helpers tested; no complete lab OLED/input simulator | Final `4d1fd3a` workflow checks pending; source/helper tests do not prove physical RF behavior |
+| New OLED lab UI | Russian friendly receive/files/chat/settings home, with advanced tools and previous menu retained; keyboard, scrollable metadata, release guards | State helpers tested; no complete lab OLED/input simulator | Final device workflow checks pending; source/helper tests do not prove physical RF behavior |
 | Pocket main menu / appearance | Default Pocket plus Pages, List, Wii and DSi; same eight categories, icons, counters, scrollbar, SD status and retained settings migration | 21,892 renderer/model/migration checks on Windows Zig and Ubuntu GCC | Release 2 physical OLED/button/style check pending |
 | Categorized SD launcher | All apps/Tools/Games/Radio/Favorites/Recent; bounded comment metadata, safe filenames, 32-entry catalog, eight favorites and four recent apps persisted on SD | 758,551 checks, including 10,000 metadata mutations and 10,000 preference operations, filters/path/scroll bounds | Release 2 SD persistence, app info and navigation pending |
 | SD Apps / Lua SDK | Bounded VM, Russian drawing/input/clock and receive-only radio bindings; eleven source apps, including four games and four new utilities | Actual Lua VM/sandbox: 91,990 host checks and 16,500 sample frames; meaningful game/math/timer fixtures | All eleven Russian apps PASS 120 diagnostic frames each on `c5779ee`, radio starts disabled; latest candidate's final device check pending |
@@ -50,9 +53,13 @@ or establish RF interoperability.
   and the documented chat packets are the new developer formats; rc-switch's
   existing decoders remain available. Unsupported protocol metadata can be
   inspected but is never advertised as decoded or replayable.
-  The new static Princeton24 / CAME12/24 encoder is an explicit narrow exception:
+  The new static RcSwitch (protocol 1, 1..32 bits) / Princeton 1..32 / CAME 12/24 encoder is an explicit narrow exception:
   it generates supported static keys, not dynamic-code replay or a general
-  decoder. RAW playback also requires the documented bounded binary OOK format.
+  decoder. Official Flipper Princeton is 24 bits; other supported Princeton
+  widths are an ESP-HACK legacy-input extension. Names are matched explicitly,
+  without protocol aliases. RAW playback also requires the documented bounded
+  binary OOK format. Refusals show the actual Protocol; a channel-policy error
+  does not classify a file as dynamic.
 - Chat is plaintext, unauthenticated ASCII. Authenticated encryption, UTF-8,
   persistent message history and multi-user collision stress testing remain
   future work. CRC and short boot/session identifiers are not security controls.

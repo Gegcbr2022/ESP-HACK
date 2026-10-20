@@ -5,10 +5,11 @@ host tests, actual target compilation, and connected-device evidence. A passing
 mock does not establish RF sensitivity, pulse accuracy or physical interoperability.
 Release 1 artifact/device evidence is explicitly historical. The Russian
 `c5779ee` source state passed CI and eleven-app ESP32 diagnostics, while chat
-still failed both physical directions. The later `4d1fd3a` candidate adds file
-pagination and finite USB RF/file diagnostics. Its final image identification,
-flash/probe and physical results await the release owner and are not inferred
-from the earlier build.
+still failed both physical directions. A verified later `e23c31d` image received
+controlled Flipper packets with valid CRC at an adjusted programmed receive
+frequency. All three CI jobs passed at `28e4d46`. The subsequent `d63f1ca`
+carrier-gate change awaits its own CI and final physical two-way sign-off;
+earlier results are not generalized to that image.
 
 ## Build results
 
@@ -19,7 +20,9 @@ from the earlier build.
 | Integrated RF lab build before the Lua SDK | PASS | SH1106 target linked and full image merged; one checked intermediate reported 115,872 static RAM bytes and 1,531,693 flash bytes; these are not the final Lua firmware's sizes |
 | Historical release 1 ESP32 image, plaintext chat and five-app diagnostics | PASS | SH1106 linked and full image merged: 117,768 static RAM bytes, 1,651,585 flash bytes (84.0%); application binary 1,658,160 bytes, SHA256 `286d1bd5f7f810df885393c1af66f38202a0f311cf8f051f3630394937e8d1f1` |
 | Russian release 2 source `c5779ee`: Pocket/settings, static Send, simple chat and eleven apps | PASS build/CI; device app checks recorded below | Linux SH1106 CI linked and uploaded its firmware; all eleven Russian SD apps passed 120 diagnostic frames each on the ESP32 build. Physical chat still failed both directions. The release owner's image manifest identifies the separately built device binary |
-| Later candidate `4d1fd3a`: file pagination, reference-clock probe and finite USB diagnostics | Final device/artifact sign-off pending | The release owner will record matching build result, application size/SHA256, flash verification and actual probe results. Earlier CI/device evidence does not identify or validate this candidate |
+| Intermediate image `e23c31d` | Verified flashed; controlled one-way RX PASS | Valid-CRC Flipper-to-ESP32 packets at adjusted programmed RX frequency; final calibrated two-way exchange was not established by this test |
+| Source `28e4d46`: complete-path pagination, reference-clock probe, UART diagnostics and device calibration | PASS native / ESP32 / Flipper CI | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,605 flash bytes (86.3%); both target artifacts uploaded. Final device evidence is recorded separately |
+| Later source `d63f1ca`: host carrier-gate correction | Native profile/helper tests PASS; final CI/device sign-off pending | Host gate uses cached RSSI/sync state and the selected threshold; shared MCSM1 wire profile is unchanged. This row does not claim peer reception |
 | Companion Flipper chat FAP (previous checked source) | PASS | uFBT 0.2.6, official firmware/SDK 1.5.1, target 7 / API 88.2; actual `.fap` produced and strict import check passed |
 
 The official Flipper source reference is
@@ -39,9 +42,12 @@ then linked with the C++ test harness; it is not replaced by a Python emulator.
 |---|---|---|
 | Portable radio settings and `.sub` support | **21,000 checks PASS** | Exact official presets, bandwidth/deviation/frequency boundaries, invalid combinations, parser bounds/signs/corruption, UTF-8 BOM/encoding checks and five-modulation preset persistence; includes 20,000 deterministic malformed-input mutations |
 | Lab limits, FIFO policy, packet metadata and LAB-OOK24 decoder | **10,593 checks PASS** | TX opt-in/channel/duration bounds, synthesized band limits, RMT splitting, IDLE empty/partial recovery, complete FIFO counts 3–63, RX/non-RX deadlines, overflow, CRC bit flips, signed RSSI/frequency-error decoding, timing tolerance and 52-interval generator termination |
-| Automatic Flipper plaintext profile | **61 checks PASS** | Complete register/PA presence, valid GFSK settings, exact shared profile, frequency and host deadline setup; source correctness does not establish RF reception |
-| Static `.sub` encoder | **800,843 checks PASS** | Production parser/config/Princeton24/CAME12/24 encoder, six periods, bit order, period decoding, TE/guard handling, CAME LOW-header rotation, duration/capacity/canaries, rejection of dynamic or unsupported metadata and modem shaping |
-| Radio file pagination / complete paths | **1,069,109 checks PASS** | 39 actual entries plus a separate NextPage slot; directory sizes 0–1000 across every page, order/coverage, deletion clamp, complete112-byte buffer boundaries and Russian/spaced names; no filesystem hardware in this harness |
+| Automatic Flipper plaintext profile / host carrier gate | **1,048,643 checks PASS** | Complete register/PA presence, exact shared profile, frequency/deadline setup and cached RSSI/sync gate boundaries; Windows Zig and Ubuntu GCC. This later suite replaces the 61-check profile suite; source correctness does not establish RF reception |
+| Static `.sub` encoder | **1,066,348 checks PASS** | Exact `RcSwitch` protocol 1 and `Princeton` 1..32-bit inputs, CAME 12/24, six periods, bit order, period decoding, TE/guard handling, CAME LOW-header rotation, duration/capacity/canaries and unsupported metadata/modem refusal. Non-24 Princeton is an ESP-HACK legacy-input extension; official Flipper Princeton is 24 bits |
+| Radio file pagination / complete paths | **1,108,737 checks PASS** | 39 lightweight identities plus a separate NextPage slot; directories 0–1000 entries across every page, order/coverage, stale identity refusal, deletion clamp, 1023-byte complete-path boundary and Russian/spaced names; no filesystem hardware in this harness |
+| Actual file-browser controller, mocked SD | **5,026 checks PASS** | Production list/resolve/path functions: directory rescan identities, long UTF-8 filenames, page controls and refusal without opening a truncated preview |
+| Actual idle UART dispatcher, mocked serial | **1,489 checks PASS** | Deferred chat opening after parser return, bounded input and repeated open/send/close lifecycle; no serial hardware or RF in this harness |
+| Device-local frequency correction | **6,730,289 checks PASS** | Signed ppm arithmetic, band edges, bounded NVS values, persistence/readback and busy/error guards; no external RF frequency calibration in this harness |
 | CC1101 reference-clock probe, hardware mocks | **246 checks PASS** | Actual probe source with PCNT/SPI/clock adapters; finite measurements, busy/SPI/counter/timing/overflow faults, pin/register restoration and cleanup; no actual crystal measurement in this harness |
 | Legacy payload / replay guards | PASS | First/changed key length packing, exact OOK preset application, unsupported formats/protocols, payload and timing bounds; this harness does not export a numeric check count |
 | Shared chat, C99 | **394 checks PASS** plus **100,000 malformed-frame trials** | Serialization/CRC, bounds, delivery/ACK/retry/duplicates, fragmentation, delayed/lost traffic, boot/session changes and time wrap |
@@ -85,6 +91,7 @@ python tests/portable/run_lab_tests.py --compiler <zig.exe>
 python tests/portable/run_chat_profile_tests.py --compiler <zig.exe>
 python tests/portable/run_static_sub_tests.py --compiler <zig.exe>
 python tests/portable/run_file_page_tests.py --compiler <zig.exe>
+python tests/file_browser_mock/run.py --compiler <zig.exe>
 python tests/portable/run_legacy_tests.py --compiler <zig.exe>
 python tests/portable/run_app_catalog_tests.py --compiler <zig.exe>
 python tests/pocket_menu/run.py --compiler <zig.exe>
@@ -92,6 +99,8 @@ python tests/run_chat_tests.py --compiler <zig.exe>
 python tests/flipper_chat_compat/run.py --compiler <zig.exe>
 python tests/spi_driver_mock/run_spi_tests.py --compiler <zig.exe>
 python tests/rf_clock_mock/run.py --compiler <zig.exe>
+python tests/radio_serial_mock/run.py --compiler <zig.exe>
+python tests/radio_calibration_mock/run.py --compiler <zig.exe>
 python tests/raw_capture_mock/run.py --cxx <zig.exe> --zig
 python tests/triggered_capture/run_triggered_tests.py --compiler <zig.exe>
 python tests/lua_sandbox/run.py --compiler <zig.exe>
@@ -99,9 +108,10 @@ python tests/app_install_mock/run.py --cxx <zig.exe> --zig
 python -m unittest discover -s tests/host -p test_device_flash.py -v
 ```
 
-The release 2 Lua, catalog, Pocket, static encoder, pagination and clock-probe
-suites passed on Windows Zig and Ubuntu GCC. Latest recorded parser/profile
-counts also passed in the `c5779ee` Ubuntu CI run. Full local stdout logs are retained outside the repository; raw device
+The release 2 Lua, catalog, Pocket, static encoder, pagination, browser, UART,
+calibration and clock-probe suites passed on Windows Zig and Ubuntu GCC.
+The later carrier-gate profile suite also passed both compilers locally.
+Full local stdout logs are retained outside the repository; raw device
 logs and backup data are not public source artifacts.
 
 ## CI configuration
@@ -112,7 +122,8 @@ tests, the SH1106 firmware and the official 1.5.1 FAP. Native C++ suites use
 25 C translation units and `g++` for its harness. The RAW runner accepts `--cxx`
 and does not require Zig on Linux. The native job includes all eleven Lua apps,
 app catalog, Pocket appearance/migration, parser/static encoders, chat profile,
-file pagination, clock-probe mocks, legacy guards and installer checks.
+file pagination/browser, clock-probe mocks, UART lifecycle, device calibration,
+legacy guards and installer checks.
 
 The configured action release tags were checked against the official
 [checkout release](https://github.com/actions/checkout/releases/tag/v7.0.1),
@@ -129,8 +140,15 @@ passed **native, ESP32 SH1106 and Flipper** at exact source
 `c5779ee2f6c50ebeb8cbe183697a06b03a4824c2`. Both ESP32 and Flipper artifacts
 uploaded successfully. It includes the Russian UI/apps, static encoder and
 automatic profile suites, after the host-only game-fixture cleanup. This run
-predates pagination and the clock-probe diagnostics in `4d1fd3a`; a new run is
-needed to cover those changes. Their local native tests are recorded above.
+predates the full-path browser and device-calibration changes.
+
+The [later three-job CI run](https://github.com/Gegcbr2022/ESP-HACK/actions/runs/39483329325)
+passed **native, ESP32 SH1106 and Flipper** at exact source
+`28e4d46356ce7713ec4af1c4c24c5e8dcfdb82f2`. It includes the updated static
+encoder, complete-path browser, UART lifecycle and calibration suites. Both
+ESP32 and Flipper artifacts uploaded successfully. The subsequent `d63f1ca`
+carrier-gate change requires its own result; the 1,048,643-check local profile
+suite is not attributed to the earlier run.
 The supplied firmware's manifest/SHA256 identifies its own Windows build;
 GitHub Actions builds independently on Linux.
 
@@ -180,15 +198,31 @@ selects the expected GFSK9.99 profile. This narrows a source comparison and does
 or identify a unique physical cause. The supplied official1.5.1/API88.2 ESP ACK
 companion FAP is distinct from this Enhanced app.
 
-### Later candidate `4d1fd3a`: pending final device record
+### Controlled one-way RF evidence after `c5779ee`
 
-The release owner will append the candidate's application size/hash, matched
-build result, flash verification, boot state, paginated SD workflow and actual
-reference-clock probe. The 246 clock tests above use mocks and must not be
-reported as a measured 26 MHz crystal. Earlier `c5779ee` app/CI results do not
-validate the later image. No successful physical chat exchange, known-waveform
-reception, RF edge-jitter measurement or calibrated RF/power result is recorded
-here. Follow `HARDWARE_VALIDATION.md` and retain failed attempts.
+The later `e23c31d` candidate was verified flashed. With the Flipper programmed
+to 433.920 MHz, the ESP32 received controlled packets with valid CRC when its
+receiver was programmed to 433.970 MHz. A fine sweep over programmed offsets
+of 20–80 kHz produced 14 valid-CRC messages. The CC1101 frequency-error estimate
+was +9,521 Hz at 433.960 MHz, 0 at 433.970 MHz and −9,521 Hz at 433.980 MHz.
+These are programmed settings and on-chip estimates, not an external RF
+frequency measurement. They support a device-specific correction without
+establishing a universal offset or calibrated output power.
+
+The release owner subsequently recorded normal-UI reception of three
+valid-CRC packets, zero frequency-error estimate and persistence of the local
++115 ppm NVS correction, without a panic. A separate carrier-busy host gate
+blocked ESP32 transmission under background carrier indication; `d63f1ca`
+changes that host gate and is awaiting final bidirectional testing.
+
+### Final device sign-off remains separate
+
+The release owner will append the final application size/hash, matching flash
+verification, boot state, saved-correction readback, paginated SD workflow and
+two-way RF result. The 246 clock tests above use mocks and must not be reported
+as a measured crystal. Earlier app/CI results do not identify a later device
+image. RF edge jitter and calibrated RF/power remain unmeasured here. Follow
+`HARDWARE_VALIDATION.md` and retain failed attempts.
 
 See [Pocket UI](POCKET_UI.md), [SD utilities](SD_UTILITIES.md) and
 [SD games](SD_GAMES.md) for controls and limits.
