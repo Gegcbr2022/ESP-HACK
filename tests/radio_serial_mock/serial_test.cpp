@@ -15,6 +15,7 @@ bool inMenu=true,serialChatContext=false,serialChatListen=false,serialChatReport
 bool serialChatCloseRequested=false,serialChatOpenPending=false;
 bool serialChatEditPending=false,serialChatEditing=false;
 bool serialCaptureContext=false,serialCaptureOpenPending=false,serialCaptureSavePending=false,serialCaptureCloseRequested=false;
+char captureSavedPath[112]="";
 ChatMode chatFormat=ChatMode::FlipperPlaintext;
 static LabSnapshot observed={};
 static unsigned pollDepth,maxDepth,uiCalls,sends,stops,restores,starts,history,diagnostics,stats,screens;
@@ -189,5 +190,9 @@ int main(){
     serialCaptureContext=true;Serial.feed("chatopen\ncaptureopen\n");runPoll();CHECK(!serialChatOpenPending&&!serialCaptureOpenPending);serialCaptureContext=false;
     Serial.feed("captureopen\n");runPoll();CHECK(serialCaptureOpenPending);observed.active=true;
     radioLabHandlePending();CHECK(!serialCaptureOpenPending&&captureCalls==1);observed.active=false;
+    observed.captureQualifiedPulses=37;observed.captureRssiQualified=true;Serial.output.clear();testedPrintCaptureStatus();
+    CHECK(Serial.output.find("qualifiedPulses=37 rssiQualified=1")!=std::string::npos);
+    observed.captureQualifiedPulses=0;observed.captureRssiQualified=false;Serial.output.clear();testedPrintCaptureStatus();
+    CHECK(Serial.output.find("qualifiedPulses=0 rssiQualified=0")!=std::string::npos);
     std::printf("Radio serial controller: %u checks passed (actual extracted functions, UART/UI/worker doubles)\n",checks);
 }
