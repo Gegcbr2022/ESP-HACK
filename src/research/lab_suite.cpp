@@ -46,9 +46,15 @@ void printChatStatus() {
         (unsigned long)s.packets,(unsigned long)s.crcErrors,(unsigned long)s.fifoErrors,(unsigned long)s.spiErrors,
         (unsigned long)s.misoTimeouts,(unsigned long)s.receivedMessages,(unsigned long)s.sentMessages,
         (unsigned long)s.plaintextRejected,(unsigned long)s.plaintextTruncated,s.lastPacketLength,s.lastLqi);
+    if(s.packets || s.crcErrors)Serial.printf("[Chat] lastPacket rssi=%.1f freqestHz=%ld crc=%u statusCRC=%u statusLqi=%u peakRssi=%d\n",
+        s.packetRssiHalfDbm / 2.0, (long)s.packetFrequencyErrorHz, s.lastCrcOk, s.lastStatusCrcOk, s.lastStatusLqi, s.peakDbm);
     Serial.printf("[Chat] configured IOCFG0=%02X PKTLEN=%02X PKTCTRL1=%02X PKTCTRL0=%02X SYNC=%02X%02X MDMCFG=%02X/%02X/%02X MCSM1=%02X\n",
         s.registers[2],s.registers[6],s.registers[7],s.registers[8],s.registers[4],s.registers[5],
         s.registers[0x10],s.registers[0x11],s.registers[0x12],s.registers[0x17]);
+    Serial.printf("[Chat] configured FREQ=%02X%02X%02X FSCTRL=%02X/%02X MDMCFG1/0=%02X/%02X DEVIATN=%02X BSCFG=%02X FOCCFG=%02X AGC=%02X/%02X/%02X FREND=%02X/%02X\n",
+        s.registers[0x0D],s.registers[0x0E],s.registers[0x0F],s.registers[0x0B],s.registers[0x0C],
+        s.registers[0x13],s.registers[0x14],s.registers[0x15],s.registers[0x1A],s.registers[0x19],
+        s.registers[0x1B],s.registers[0x1C],s.registers[0x1D],s.registers[0x21],s.registers[0x22]);
     if(s.message[0])Serial.printf("[Chat] last=%s\n",s.message);
 }
 

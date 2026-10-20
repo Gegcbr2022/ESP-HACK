@@ -25,6 +25,10 @@ struct LabSnapshot {
     uint32_t plaintextRejected, plaintextTruncated;
     uint32_t syncEvents, rxRearms;
     uint8_t lastPacketLength, lastLqi;
+    int16_t packetRssiHalfDbm;
+    int32_t packetFrequencyErrorHz;
+    uint8_t lastStatusLqi;
+    bool lastCrcOk, lastStatusCrcOk;
     ChatMode chatMode;
     uint8_t delivery;
     char message[161], status[64], txBlockReason[32];

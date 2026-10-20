@@ -1,6 +1,7 @@
 #include "lab_service.h"
 #include "raw_capture.h"
 #include "triggered_capture.h"
+#include "packet_metadata.h"
 #include "../CONFIG.h"
 #include "../../shared/chat_radio.h"
 #include "../../shared/chat_session.h"
@@ -249,11 +250,18 @@ bool readPacket(uint8_t* frame, size_t& length) {
     if(length > 60 || length + 3 != (bytes & 0x7F)) {
         errorCount(&LabSnapshot::fifoErrors); receive(activeSettings.frequencyHz, false); return false;
     }
+    // Capture demodulator status while the packet remains frozen in IDLE.
+    // Re-entering RX clears CRC_OK and can replace RSSI/FREQEST with noise.
+    const uint8_t frequencyEstimate = ELECHOUSE_cc1101.SpiReadStatus(0x32);
+    const uint8_t statusLqi = ELECHOUSE_cc1101.SpiReadStatus(0x33);
     ELECHOUSE_cc1101.SpiReadBurstReg(0x3F, frame, length);
     uint8_t trailer[2]; ELECHOUSE_cc1101.SpiReadBurstReg(0x3F, trailer, 2);
-    bool valid = trailer[1] & 0x80;
+    const PacketMetadata metadata = packetMetadata(trailer[0], trailer[1], frequencyEstimate, statusLqi);
+    const bool valid = metadata.crcOk;
     portENTER_CRITICAL(&lock);
-    state.lastPacketLength = length; state.lastLqi = trailer[1] & 0x7F;
+    state.lastPacketLength = length; state.lastLqi = metadata.lqi;
+    state.packetRssiHalfDbm = metadata.rssiHalfDbm; state.packetFrequencyErrorHz = metadata.frequencyErrorHz;
+    state.lastStatusLqi = metadata.statusLqi; state.lastCrcOk = metadata.crcOk; state.lastStatusCrcOk = metadata.statusCrcOk;
     portEXIT_CRITICAL(&lock);
     if(!valid) errorCount(&LabSnapshot::crcErrors);
     else errorCount(&LabSnapshot::packets);

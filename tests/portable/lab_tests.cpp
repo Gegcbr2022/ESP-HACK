@@ -1,5 +1,6 @@
 #include "lab_limits.h"
 #include "test_decoder.h"
+#include "packet_metadata.h"
 #include <limits.h>
 #include <stdio.h>
 #include <string.h>
@@ -8,6 +9,23 @@ using namespace research;
 static unsigned checks;
 #define CHECK(test) do { ++checks; if(!(test)) { fprintf(stderr,"FAIL line %d: %s\n",__LINE__,#test); return 1; } } while(0)
 int main() {
+    // Independent datasheet vectors distinguish signed RSSI/frequency from
+    // unsigned link quality, and preserve the two independent CRC observations.
+    CHECK(packetMetadata(0x80,0xFF,0x80,0x00).rssiHalfDbm==-276);
+    CHECK(packetMetadata(0xFF,0x00,0xFF,0xFF).rssiHalfDbm==-149);
+    CHECK(packetMetadata(0x00,0x00,0x00,0x00).rssiHalfDbm==-148);
+    CHECK(packetMetadata(0x7F,0x00,0x7F,0x00).rssiHalfDbm==-21);
+    CHECK(packetMetadata(0,0,0x80,0).frequencyErrorHz==-203125);
+    CHECK(packetMetadata(0,0,0xFF,0).frequencyErrorHz==-1586);
+    CHECK(packetMetadata(0,0,0x7F,0).frequencyErrorHz==201538);
+    for(unsigned raw=0;raw<256;++raw) {
+        const PacketMetadata metadata=packetMetadata(uint8_t(raw),uint8_t(raw),uint8_t(raw),uint8_t(raw^0x80));
+        CHECK(metadata.rssiHalfDbm>=-276&&metadata.rssiHalfDbm<=-21);
+        CHECK(metadata.frequencyErrorHz>=-203125&&metadata.frequencyErrorHz<=201538);
+        CHECK(metadata.lqi==(raw%128)&&metadata.statusLqi==metadata.lqi);
+        CHECK(metadata.crcOk==(raw>=128)&&metadata.statusCrcOk!=metadata.crcOk);
+        CHECK(metadata.rssiHalfDbm+148==(raw>=128?int(raw)-256:int(raw)));
+    }
     CHECK(!permitLabTx(TxProfile::ReceiveOnly,433920000,100,1000));
     CHECK(permitLabTx(TxProfile::ShieldedLab,433920000,1,1));
     CHECK(permitLabTx(TxProfile::ShieldedLab,868350000,5000,5000));
