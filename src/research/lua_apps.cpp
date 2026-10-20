@@ -387,9 +387,13 @@ void runSdApps() {
 }
 
 void sdAppsSelfTest() {
-    if(activeApp) { Serial.println("[Lua] SELFTEST busy"); return; }
+    if(activeApp || research::labSnapshot().active) { Serial.println("[Lua] SELFTEST busy"); return; }
+    // Match the launcher: noisy legacy RX interrupts must not consume a VM
+    // callback's wall-time budget while the diagnostic owns the device.
+    suspendLegacyReceive();
+    while(!research::labStop()) delay(10);
     void* bank = heap_caps_malloc(LuaSandbox::kHeapBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    if(!bank) { Serial.println("[Lua] SELFTEST FAIL heap allocation"); return; }
+    if(!bank) { Serial.println("[Lua] SELFTEST FAIL heap allocation"); restoreReceiveMode(); return; }
     Runtime runtime = {}; runtime.diagnostic = true; activeApp = &runtime;
     LuaSandbox vm(bank, LuaSandbox::kHeapBytes, clockUs);
     const char smoke[] = "app={draw=function() ui.clear();ui.text(0,0,'Lua SDK self-test');ui.line(0,12,127,12) end,tick=function(dt) assert(dt==33) end}";
@@ -405,5 +409,6 @@ void sdAppsSelfTest() {
         "countdown.lua","calculator.lua","unit_converter.lua","resistor_codes.lua","blockfall.lua","mines.lua"};
     for(size_t i = 0; i < sizeof(samples) / sizeof(samples[0]); ++i) sampleSelfTest(samples[i], bank);
     free(bank);
+    restoreReceiveMode();
     returnToMainMenu();
 }
