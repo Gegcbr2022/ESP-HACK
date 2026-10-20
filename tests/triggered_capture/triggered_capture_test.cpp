@@ -304,10 +304,65 @@ static bool post_gate_qualification(void) {
     CHECK(corrupt.phase()==TriggeredCapture::Phase::Corrupt&&corrupt.rejected()==1&&corrupt.rearmCount()==0);
     return true;
 }
+struct RecoveryTraceEvent { uint32_t at; int32_t value; uint8_t type; };
+#include "strong_leadin_trace.inc"
+static bool carrier_leadin_recovers(void) {
+    int32_t out[256];TriggeredCapture replay(out,256,-70,recoveryTrace[0].at);
+    bool sawBlockedCarrier=false,sawRealTrigger=false;
+    for(size_t i=0;i<sizeof recoveryTrace/sizeof recoveryTrace[0];++i) {
+        const RecoveryTraceEvent& event=recoveryTrace[i];
+        if(event.type==1)replay.pulse(event.value,event.at);
+        else {replay.rssi(int16_t(event.value),event.at);replay.poll(event.at);}
+        if(event.at>=2909441&&event.at<2951020) {
+            CHECK(!replay.triggered()&&!replay.complete()&&replay.rearmCount()==1);
+            sawBlockedCarrier=true;
+        }
+        if(event.at>2954101&&replay.triggered())sawRealTrigger=true;
+        if(replay.terminal())break;
+    }
+    CHECK(sawBlockedCarrier&&sawRealTrigger&&replay.complete());
+    CHECK(replay.rearmCount()==1&&replay.postTriggerPulses()>=20&&replay.rssiQualified());
+    CHECK(replay.size()>=48&&replay.dropped()==0&&replay.rejected()==0);
+    // Decode the first24 independent 1:3/3:1 OOK bit ratios. This recorded frame
+    // is the known synthetic key, not a copied production encoder waveform.
+    uint32_t decoded=0;
+    for(unsigned bit=0;bit<24;++bit) {
+        CHECK(out[2*bit]>0&&out[2*bit+1]<0);
+        decoded=(decoded<<1)|(uint32_t(out[2*bit])>uint32_t(-out[2*bit+1]));
+    }
+    CHECK(decoded==0xA53A53);
+
+    // Four fresh complete intervals are needed after the new partial LOW.
+    // Old context, repeated RSSI and a long carrier lead-in do not count.
+    uint32_t now=0xFFFF0000u;TriggeredCapture fresh(out,256,-70,now);
+    feed(fresh,now,-100);fresh.rssi(-30,now);fresh.rssi(-30,now+1000);
+    now+=7000;fresh.poll(now);CHECK(fresh.rearmCount()==1&&!fresh.triggered());
+    for(unsigned i=0;i<42;++i) {now+=1000;fresh.rssi(-30,now);CHECK(!fresh.triggered()&&fresh.rearmCount()==1);}
+    feed(fresh,now,-49000); // Partial interval at the beginning of the real train.
+    for(unsigned i=0;i<3;++i) {feed(fresh,now,i&1?-390:390);fresh.rssi(-30,now);CHECK(!fresh.triggered());}
+    feed(fresh,now,-390);fresh.rssi(-30,now);
+    CHECK(fresh.triggered()&&fresh.postTriggerPulses()==0&&fresh.size()==4);
+    for(unsigned i=0;i<20;++i)feed(fresh,now,i&1?-390:390);
+    fresh.rssi(-30,now);CHECK(fresh.rssiQualified()&&fresh.postTriggerPulses()==20);
+    fresh.poll(now+7000);CHECK(fresh.complete());
+
+    // Sparse unrelated edges separated by a new quiet gap cannot accumulate
+    // into the four-edge release, and faults are never treated as clean data.
+    now=0;TriggeredCapture sparse(out,256,-70,now);feed(sparse,now,-100);sparse.rssi(-30,now);
+    now+=7000;sparse.poll(now);feed(sparse,now,-49000);
+    feed(sparse,now,300);feed(sparse,now,-300);feed(sparse,now,300);
+    feed(sparse,now,-8000);sparse.rssi(-30,now);CHECK(!sparse.triggered());
+    feed(sparse,now,300);feed(sparse,now,-300);feed(sparse,now,300);
+    sparse.rssi(-30,now);CHECK(!sparse.triggered());
+    sparse.integrity(0,1);feed(sparse,now,-300);sparse.rssi(-30,now);
+    CHECK(!sparse.triggered()&&!sparse.complete()&&sparse.rejected()==1);
+    return true;
+}
 int main() {
     if(!noise_inactive_and_pretrigger() || !minimum_gap_and_wrap() || !short_rssi_dip_and_tail() ||
        !deferred_overflow_and_stop() || !full_and_corruption() || !startup_gate() ||
-       !clean_armed_recovery() || !short_candidate_rearms() || !post_gate_qualification()) return 1;
+       !clean_armed_recovery() || !short_candidate_rearms() || !post_gate_qualification() ||
+       !carrier_leadin_recovers()) return 1;
     printf("triggered_capture: PASS (%u checks; startup median/deadline, post-gate/RSSI qualification, armed recovery, bounds, corruption)\n", checks);
     return 0;
 }

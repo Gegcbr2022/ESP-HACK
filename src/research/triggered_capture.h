@@ -13,6 +13,7 @@ public:
     static const size_t kMinimumPulses = 20;
     static const uint32_t kQuietUs = 7000;
     static const uint32_t kStrongSpanUs = 1000;
+    static const uint8_t kFreshEdgesToRearm = 4;
 
     TriggeredCapture(int32_t* output, size_t capacity, int16_t threshold, uint32_t startedUs)
         : output_(output), capacity_(capacity), used_(0), postTriggerPulses_(0), threshold_(threshold),
@@ -20,15 +21,16 @@ public:
           pendingTotal_(0), pendingLost_(0), discardedTail_(0), rawDropped_(0),
           rawRejected_(0), badSamples_(0), lostSamples_(0), droppedBase_(0), rejectedBase_(0),
           discardedArmingDropped_(0), discardedArmingRejected_(0), discardedShort_(0),
-          rearms_(0), lastEdge_(startedUs), weakSince_(0), preQuietSince_(0), triggeredAt_(startedUs),
+          rearms_(0), lastEdge_(startedUs), weakSince_(0), preQuietSince_(0), triggeredAt_(startedUs), freshEdges_(0),
           first_(true), previousPositive_(false), strong_(false), triggered_(false),
           preQuiet_(false), waitForWeak_(false), rssiQualified_(false) {}
 
     void integrity(uint32_t dropped, uint32_t rejected) {
         const uint32_t nextDropped = dropped - droppedBase_;
         const uint32_t nextRejected = rejected - rejectedBase_;
-        if(phase_ == Phase::Armed && (nextDropped != rawDropped_ || nextRejected != rawRejected_))
-            preQuiet_ = false;
+        if(phase_ == Phase::Armed && (nextDropped != rawDropped_ || nextRejected != rawRejected_)) {
+            preQuiet_ = false; freshEdges_ = 0;
+        }
         rawDropped_ = nextDropped; rawRejected_ = nextRejected;
         if((rawDropped_ || rawRejected_) && (phase_ == Phase::Capturing || phase_ == Phase::Complete))
             phase_ = Phase::Corrupt;
@@ -45,6 +47,11 @@ public:
         }
         if(positive == previousPositive_) { reject(); return; }
         previousPositive_ = positive;
+        if(phase_ == Phase::Armed && waitForWeak_) {
+            const uint32_t duration = positive ? uint32_t(value) : uint32_t(-value);
+            if(duration > kQuietUs) { freshEdges_ = 0; clearPending(); }
+            else if(++freshEdges_ >= kFreshEdgesToRearm) waitForWeak_ = false;
+        }
         const bool afterTrigger = phase_ == Phase::Capturing &&
                                   uint32_t(edgeUs - triggeredAt_) < 0x80000000UL;
         if(phase_ == Phase::Armed || !strong_) remember(value, afterTrigger);
@@ -139,7 +146,7 @@ private:
     void reject() {
         ++badSamples_;
         if(phase_ == Phase::Capturing) phase_ = Phase::Corrupt;
-        else if(phase_ == Phase::Armed) preQuiet_ = false;
+        else if(phase_ == Phase::Armed) { preQuiet_ = false; freshEdges_ = 0; }
     }
     void cleanArmedBoundary() {
         // Only an RSSI-quiet, loss-free armed window may retire stale noise.
@@ -148,17 +155,18 @@ private:
         discardedArmingRejected_ += rawRejected_ + badSamples_;
         droppedBase_ += rawDropped_; rejectedBase_ += rawRejected_;
         rawDropped_ = rawRejected_ = badSamples_ = 0;
-        clearPending(); first_ = true; previousPositive_ = false; waitForWeak_ = false;
+        clearPending(); first_ = true; previousPositive_ = false; waitForWeak_ = false; freshEdges_ = 0;
     }
     void rearmShort(uint32_t nowUs, bool weakQuiet) {
         if(pendingLost_) { lostSamples_ += pendingLost_; phase_ = Phase::Corrupt; return; }
         discardedShort_ += uint32_t(used_) + pendingTotal_; ++rearms_;
         used_ = postTriggerPulses_ = 0; rssiQualified_ = false;
-        clearPending(); first_ = true; previousPositive_ = false;
+        clearPending(); first_ = true; previousPositive_ = false; freshEdges_ = 0;
         phase_ = Phase::Armed; strong_ = triggered_ = false;
         lastEdge_ = nowUs; preQuiet_ = weakQuiet; preQuietSince_ = nowUs;
         // An unmodulated strong carrier cannot continually retrigger an empty
-        // candidate. Require a real weak-RSSI boundary before accepting more.
+        // candidate. A weak boundary OR a new four-edge train can rearm: a
+        // transmitter may hold its carrier before the actual data starts.
         waitForWeak_ = !weakQuiet;
     }
     void remember(int32_t value, bool afterTrigger) {
@@ -198,6 +206,7 @@ private:
     uint32_t rawDropped_, rawRejected_, badSamples_, lostSamples_, droppedBase_, rejectedBase_;
     uint32_t discardedArmingDropped_, discardedArmingRejected_, discardedShort_, rearms_;
     uint32_t lastEdge_, weakSince_, preQuietSince_, triggeredAt_;
+    uint8_t freshEdges_;
     bool first_, previousPositive_, strong_, triggered_, preQuiet_, waitForWeak_, rssiQualified_;
 };
 }
