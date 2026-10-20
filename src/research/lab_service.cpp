@@ -451,10 +451,16 @@ void publishCaptureHistory() {
     }
     portEXIT_CRITICAL(&lock);
 }
+TriggeredCapture makeRawCandidate(uint32_t startedUs) {
+    // Keep repeated frames and their inter-frame guard in one history signal.
+    // Advanced single capture/tracing preserve the original7ms boundary.
+    return TriggeredCapture(capture,kWaveformCapacity,activeSettings.rssiThresholdDbm,
+                            startedUs,activeRawHistory?30000:TriggeredCapture::kQuietUs);
+}
 bool restartRawCandidate(TriggeredCapture& trigger) {
     raw_capture::stop();
     if(!raw_capture::start(CC1101_GDO0)){status("RAW rearm allocation failed");return false;}
-    trigger=TriggeredCapture(capture,kWaveformCapacity,activeSettings.rssiThresholdDbm,raw_capture::snapshot().startedUs);
+    trigger=makeRawCandidate(raw_capture::snapshot().startedUs);
     historyCandidateStored=false;
     portENTER_CRITICAL(&lock);state.peakDbm=-127;portEXIT_CRITICAL(&lock);
     publishRaw(trigger,raw_capture::snapshot());
@@ -607,7 +613,7 @@ void worker(void*) {
         if(!configured)status("No internal RAM for RAW timestamps");
     }
     const uint32_t rawStartedUs = raw_capture::snapshot().startedUs;
-    TriggeredCapture rawTrigger(capture, kWaveformCapacity, activeSettings.rssiThresholdDbm, rawStartedUs);
+    TriggeredCapture rawTrigger=makeRawCandidate(rawStartedUs);
     if(configured && mode == LabMode::Raw) status("Armed: waiting RSSI threshold");
     // Sample immediately on the first iteration; chat must never decide to TX
     // using the initial placeholder RSSI. Further samples remain 10ms apart.
