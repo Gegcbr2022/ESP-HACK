@@ -5,6 +5,8 @@
 #include "test_decoder.h"
 #include "app_install.h"
 #include "lua_apps.h"
+#include "../../shared/flipper_chat_compat.h"
+#include "../../shared/chat_session.h"
 #include "../subghz.h"
 #include <SD.h>
 #include <esp_system.h>
@@ -515,9 +517,8 @@ void readHistory(){
         if(frame()){title("Chat history");if(historySize){const History& h=history[(historyNext+8-1-selected)%8];char b[32];if(h.peer)snprintf(b,sizeof(b),"%s %04X (%u/%u)",h.sent?"To":"From",h.peer,unsigned(selected+1),unsigned(historySize));else snprintf(b,sizeof(b),"Broadcast %s (%u/%u)",h.sent?"TX":"RX",unsigned(selected+1),unsigned(historySize));line(2,b);for(size_t row=0;row<3;++row){size_t pos=offset+row*20;if(pos<strlen(h.text)){snprintf(b,21,"%.20s",h.text+pos);display.setCursor(0,28+row*8);display.print(b);}}}else line(3,"No messages yet");footer("UP/DN item OK page BK");display.display();}}
     resetInput();
 }
-void chatApp(){
-    if(!laboratoryChannel(settings.frequencyHz)){message("Sub-GHz Chat","Select 433920000 or 868350000 Hz in Radio Settings. Both devices must match.");return;}
-    if(!startMode(LabMode::Chat))return;serialChatContext=true;uint16_t recipient=0;size_t selected=0;static const char* items[]={"Inbox / sent history","Compose message","Discover devices","Select recipient","Delivery status","Mode: ESP ACK"};resetInput();
+void chatAdvanced(uint16_t& recipient){
+    size_t selected=0;static const char* items[]={"Inbox / sent history","Compose message","Discover devices","Select recipient","Delivery status","Mode: ESP ACK"};resetInput();
     while(true){
         input();uint16_t source;char received[161];while(labReceiveMessage(source,received,sizeof(received)))addHistory(source,false,received);
         const bool plaintext=chatFormat==ChatMode::FlipperPlaintext;
@@ -533,7 +534,88 @@ void chatApp(){
         }
         if(frame()){LabSnapshot s=labSnapshot();const bool plain=chatFormat==ChatMode::FlipperPlaintext;title(plain?"Flipper plaintext":"Sub-GHz Chat / ACK");char b[48];snprintf(b,sizeof(b),"%s %lu.%03lu %ddB",s.active&&s.connected?"RX":"OFF",(unsigned long)(s.frequencyHz/1000000),(unsigned long)((s.frequencyHz/1000)%1000),s.rssiDbm);display.setCursor(0,13);display.print(b);display.setCursor(0,23);display.print(selected==5?(plain?"Mode: Flipper plain":"Mode: ESP ACK"):selected==2&&plain?"Send presence":selected==3&&plain?"Compatibility info":items[selected]);snprintf(b,sizeof(b),"P%lu C%lu F%lu M%lu",(unsigned long)s.packets,(unsigned long)s.crcErrors,(unsigned long)s.fifoErrors,(unsigned long)s.receivedMessages);display.setCursor(0,33);display.print(b);display.setCursor(0,43);display.print(s.txBlockReason);footer("UP/DN item OK open BK");display.display();}
     }
-    labStop();serialChatContext=false;resetInput();
+    resetInput();
+}
+bool simpleChatSend(uint16_t recipient,const char* text) {
+    const LabSnapshot s=labSnapshot();
+    const uint16_t destination=chatFormat==ChatMode::FlipperPlaintext?0:(recipient?recipient:s.peer);
+    if(!labQueueText(text,destination))return false;
+    addHistory(destination,true,text);return true;
+}
+int chatSendMenu(uint16_t& recipient) {
+    static const char* choices[]={"Write message","Hello","TEST123","OK","Advanced"};
+    size_t selected=2;resetInput();
+    while(true) {
+        input();if(back||holdBack)break;
+        if(up)selected=(selected+4)%5;if(down)selected=(selected+1)%5;
+        if(ok) {
+            if(selected==4){chatAdvanced(recipient);break;}
+            char text[161]="";
+            if(selected==0){if(!textEntry("Write message",text,sizeof(text))){resetInput();continue;}}
+            else snprintf(text,sizeof(text),"%s",choices[selected]);
+            if(text[0]) {
+                const bool queued=simpleChatSend(recipient,text);
+                showNotice(queued?"Message queued":"Message not queued: radio busy/off");
+                resetInput();return queued?1:-1;
+            }
+        }
+        if(frame()) {
+            title("Send message");
+            for(size_t row=0;row<4;++row){display.setCursor(0,15+row*9);display.print(row?"  ":"> ");display.print(choices[(selected+row)%5]);}
+            footer("UP/DN OK send BK back");display.display();
+        }
+    }
+    resetInput();return false;
+}
+void chatApp(){
+    const RadioSettings savedSettings=settings;const RegisterImage savedRadio=radio;
+    const TxProfile savedProfile=profile;const uint8_t savedPower=powerIndex;const ChatMode savedMode=chatFormat;
+    RegisterImage automatic;
+    for(size_t i=0;i<FLIPPER_CHAT_REGISTER_BYTES;i+=2)automatic.set(flipper_chat_registers[i],flipper_chat_registers[i+1]);
+    RadioSettings automaticSettings;
+    if(!describeRadio(automatic,433920000,automaticSettings)){message("Chat unavailable","Cannot apply chat radio profile.");return;}
+    automaticSettings.txLimitMs=1000;automaticSettings.rxTimeoutMs=0;
+    settings=automaticSettings;radio=automatic;profile=TxProfile::ShieldedLab;powerIndex=1;chatFormat=ChatMode::FlipperPlaintext;
+    const bool started=startMode(LabMode::Chat);
+    if(started) {
+        serialChatContext=true;historySize=historyNext=0;
+        uint16_t recipient=0;size_t selected=0,offset=0;bool queueError=false;resetInput();
+        while(true) {
+            input();uint16_t source;char received[161];
+            while(labReceiveMessage(source,received,sizeof(received))){addHistory(source,false,received);selected=offset=0;queueError=false;}
+            if(back||holdBack)break;
+            if(up&&historySize){if(offset)offset=0;else if(selected+1<historySize){++selected;offset=0;}}
+            if(down&&historySize) {
+                const History& h=history[(historyNext+8-1-selected)%8];
+                if(offset+100<strlen(h.text))offset+=100;
+                else if(selected){--selected;offset=0;}
+            }
+            if(ok){const int result=chatSendMenu(recipient);if(result<0)queueError=true;else if(result>0){selected=offset=0;queueError=false;}if(selected>=historySize)selected=offset=0;resetInput();}
+            if(frame()) {
+                const LabSnapshot s=labSnapshot();
+                const char* phase=!s.active?"Stopped":!s.connected?"RF ERR":queueError?"Busy":s.delivery==ChatQueued||s.delivery==ChatSending?"Sending":s.delivery==ChatFailed?"Failed":s.delivery==ChatDelivered?"Sent":"Ready";
+                title("CHAT 433.92");display.setCursor(82,2);display.setTextColor(SH110X_BLACK);display.print(phase);display.setTextColor(SH110X_WHITE);
+                if(historySize) {
+                    const History& h=history[(historyNext+8-1-selected)%8];
+                    for(size_t row=0;row<5;++row){const size_t position=offset+row*20;if(position>=strlen(h.text))break;char text[21];snprintf(text,sizeof(text),"%.20s",h.text+position);display.setCursor(0,13+row*8);display.print(text);}
+                    display.setCursor(0,56);display.print(h.sent?"You ":"Flipper ");display.print(selected+1);display.print('/');display.print(historySize);display.print(" OK send");
+                    display.drawFastHLine(0,53,128,SH110X_WHITE);
+                } else {
+                    display.setCursor(0,15);display.print(s.active&&s.connected?"Ready for Flipper":"Starting radio...");display.setCursor(0,27);display.print("Use No encryption");display.setCursor(0,39);display.print("OK to send TEST123");footer("UP/DN read OK send BK");
+                }
+                if((s.delivery==ChatQueued||s.delivery==ChatSending)&&strcmp(s.txBlockReason,"Ready: manual send")&&strcmp(s.txBlockReason,"100ms packet gap")) {
+                    display.fillRect(0,43,128,10,SH110X_BLACK);display.setCursor(0,44);display.print(s.txBlockReason);
+                } else if(queueError||!s.active||!s.connected||s.delivery==ChatFailed) {
+                    display.fillRect(0,43,128,10,SH110X_BLACK);display.setCursor(0,44);
+                    display.print(queueError?"Not queued; retry":!s.active?s.status:!s.connected?"Radio not detected":strcmp(s.txBlockReason,"Ready: manual send")?s.txBlockReason:"Radio TX failed");
+                }
+                display.display();
+            }
+        }
+        while(!labStop()){showNotice("Waiting for chat radio stop");delay(10);}
+        serialChatContext=false;resetInput();
+    }
+    settings=savedSettings;radio=savedRadio;profile=savedProfile;powerIndex=savedPower;chatFormat=savedMode;
 }
 }
 
