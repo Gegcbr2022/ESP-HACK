@@ -1,3 +1,39 @@
+# v1.3-rf-lab.2
+
+- Added Pocket as the default main menu: original category icons, three visible
+  rows, selection/scroll indicators and SD status. All five menu styles remain
+  selectable. Appearance migration retains valid unrelated settings.
+- Added a categorized SD launcher with All apps, Tools, Games, Radio, Favorites
+  and Recent sections, bounded comment metadata, descriptions, eight favorites
+  and four recent apps persisted on SD.
+- Expanded the bundle from five to eleven Lua apps. New games are Block Fall
+  and Minesweeper; new tools are a visual countdown, decimal calculator, unit
+  converter and four/five-band resistor code reader. The runtime retains its
+  48 KiB heap, 32 KiB source limit and existing callback/drawing quotas.
+- Simplified Chat into a read/send screen and quick-message menu. For the
+  authorized Faraday setup, entry temporarily applies 433.920 MHz, Flipper
+  plaintext and nominal 0 dBm with TX ready for manual sends. Exit restores
+  prior settings; no automatic beacon is transmitted. Other laboratory TX
+  functions retain their explicit profile selection. Enhanced peers must use
+  No encryption. ESP ACK mode and its companion FAP remain under Advanced.
+- Added clearer chat state/blocking reasons and packet/CRC/FIFO/state
+  diagnostics for reproducing the user's failures in both RF directions.
+  Successful physical delivery is still unresolved; local Sent is not a peer
+  acknowledgement in plaintext mode. Finite TX governors remain active.
+- Expanded `appsdiag` to all eleven installed examples, up to 120 input/tick/draw
+  frames per app with radio start disabled, followed by return to the main menu.
+  Device results are recorded separately in the test report.
+- Passed native suites on Windows Zig and Ubuntu GCC: 91,617 Lua checks and
+  16,500 sample frames, 758,543 catalog checks and 22,235 menu/migration checks.
+  Game tests now release prior host-only assertion chunks before compiling
+  another; twenty independent GCC runs passed without changing production
+  memory limits or the normal-GC app frame tests.
+
+See [Pocket UI](docs/POCKET_UI.md), [SD games](docs/SD_GAMES.md),
+[SD utilities](docs/SD_UTILITIES.md) and [test results](docs/TEST_REPORT.md).
+Release 1 flash, probe and five-app evidence remains historical and is not
+presented as release 2 validation.
+
 # v1.3-rf-lab.1
 
 - Reproduced the unmodified source baseline; pinned the working ESP32 platform
