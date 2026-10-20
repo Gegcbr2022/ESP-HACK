@@ -58,6 +58,7 @@ bool serialChatContext, serialChatListen, serialChatReported, serialChatCloseReq
 bool serialChatOpenPending;
 bool serialChatEditPending, serialChatEditing;
 bool serialCaptureContext, serialCaptureOpenPending, serialCaptureSavePending, serialCaptureCloseRequested;
+bool serialCaptureTraceRequested;
 char captureSavedPath[112]="";
 
 __attribute__((noinline)) void printChatStatus() {
@@ -1109,9 +1110,13 @@ __attribute__((noinline)) void printCaptureStatus() {
         (unsigned long)s.spiErrors,(unsigned long)s.misoTimeouts,(unsigned long)s.timeouts,s.status);
     if(captureSavedPath[0])Serial.printf("[Capture] saved=%s\n",captureSavedPath);
     Serial.printf("[Capture] rearms=%lu short=%lu armingDropped=%lu armingRejected=%lu qualifiedPulses=%lu rssiQualified=%u\n",(unsigned long)s.captureRearms,(unsigned long)s.captureShortDiscarded,(unsigned long)s.captureArmingDropped,(unsigned long)s.captureArmingRejected,(unsigned long)s.captureQualifiedPulses,s.captureRssiQualified);
+    const RawTraceInfo trace=labRawTraceInfo();
+    Serial.printf("[Capture] lastRejectedCause=%u lastRejectedUs=%lu traceEnabled=%u traceStarted=%u traceFrozen=%u traceCount=%u traceOverwritten=%lu\n",s.lastRejectedCause,(unsigned long)s.lastRejectedUs,trace.enabled,trace.started,trace.frozen,trace.count,(unsigned long)trace.dropped);
 }
 __attribute__((noinline)) void runSerialCaptureUi() {
+    const bool trace=serialCaptureTraceRequested;serialCaptureTraceRequested=false;
     if(!labStop()){Serial.println("[Capture] ERROR previous radio worker did not stop");return;}
+    if(trace&&!labRawTraceEnable(true)){Serial.println("[Capture] ERROR trace allocation/reset");return;}
     suspendLegacyReceive();
     {
         struct RestoreUi {
@@ -1127,12 +1132,29 @@ __attribute__((noinline)) void runSerialCaptureUi() {
             snprintf(activePreset,sizeof(activePreset),"AM270");captureSavedPath[0]=0;
             serialCaptureContext=true;serialCaptureCloseRequested=false;serialCaptureSavePending=false;
             Serial.println("[Capture] OPEN friendly auto-RSSI RX-only freq=433920000 limit=30000ms; no TX");
+            if(trace)Serial.println("[Capture] trace=ON ring=4096 freeze=terminal-or-stop");
             captureApp(false,true);
             while(!labStop()){Serial.println("[Capture] waiting for radio stop");delay(10);}
             serialCaptureContext=false;serialCaptureCloseRequested=false;serialCaptureSavePending=false;
         }
     }
+    if(trace&&!labRawTraceEnable(false))Serial.println("[Capture] ERROR trace freeze");
     restoreReceiveMode();
+}
+__attribute__((noinline)) void dumpCaptureTrace() {
+    if(serialChatContext||(!serialCaptureContext&&!serialChatMainIdle())){Serial.println("[RAWTRACE] ERROR requires capture UI or idle main menu");return;}
+    if(!labStop()||!labRawTraceEnable(false)){Serial.println("[RAWTRACE] ERROR radio did not stop/freeze");return;}
+    const RawTraceInfo info=labRawTraceInfo();
+    if(info.count>4096){Serial.println("[RAWTRACE] ERROR invalid count");return;}
+    Serial.printf("[RAWTRACE] BEGIN count=%u started=%u frozen=%u overwritten=%lu fields=index,us,kind,phase,value,used,post,rssiQ\n",info.count,info.started,info.frozen,(unsigned long)info.dropped);
+    for(size_t i=0;i<info.count;++i) {
+        RawTraceEntry event;
+        if(!labRawTraceCopy(i,event)){Serial.printf("[RAWTRACE] ERROR copy index=%u\n",unsigned(i));return;}
+        Serial.printf("[RAWTRACE] %u %lu %u %u %ld %u %u %u\n",unsigned(i),(unsigned long)event.atUs,unsigned(event.kind),unsigned(event.phase),(long)event.value,unsigned(event.used),unsigned(event.post),unsigned(event.rssiQualified));
+        delay(1);
+    }
+    Serial.println("[RAWTRACE] END");
+    Serial.printf("[RAWTRACE] released=%u\n",labRawTraceRelease());
 }
 uint32_t stagedWaveformHash() {
     uint32_t hash=2166136261UL;
@@ -1266,10 +1288,11 @@ void radioLabSerialPoll() {
         if(c=='\n') {
             command[used]=0;
             if(overflow)Serial.println("[Chat] ERROR command too long");
-            else if(!strcmp(command,"captureopen")) {
+            else if(!strcmp(command,"captureopen")||!strcmp(command,"capturetraceopen")) {
                 if(serialCaptureOpenPending||serialChatOpenPending||!serialChatMainIdle())Serial.println("[Capture] ERROR busy; captureopen requires the idle main menu");
-                else {serialCaptureOpenPending=true;used=0;overflow=false;command[0]=0;Serial.println("[Capture] open request queued");return;}
+                else {serialCaptureTraceRequested=!strcmp(command,"capturetraceopen");serialCaptureOpenPending=true;used=0;overflow=false;command[0]=0;Serial.println("[Capture] open request queued");return;}
             }
+            else if(!strcmp(command,"capturetracedump"))dumpCaptureTrace();
             else if(!strcmp(command,"capturestat"))printCaptureStatus();
             else if(!strcmp(command,"capturesave")) {
                 if(!serialCaptureContext||serialCaptureCloseRequested||serialCaptureSavePending)Serial.println("[Capture] ERROR save requires an open capture UI");
@@ -1312,7 +1335,7 @@ void radioLabSerialPoll() {
             else if(!strncmp(command,"chatlisten ",11))startSerialChatListen(command);
             else if((serialChatContext||serialCaptureContext||serialRadioWorkerActive())&&used)Serial.println("[RadioLab] busy: use context status/save/close or screen");
             else if(handleIdleSerialCommand(command)){}
-            else if(used)Serial.println("[RadioLab] commands: captureopen/stat/save/close, chatopen, chatedit, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfcal, rfcal ppm <signed decimal>, rfclock, rflisten433, rftest princeton433 or princeton <Hz>, sublist /subghz, subinspect or subdump /subghz/file.sub, appsdiag, APP_PUT");
+            else if(used)Serial.println("[RadioLab] commands: captureopen/stat/save/close, capturetraceopen, capturetracedump, chatopen, chatedit, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfcal, rfcal ppm <signed decimal>, rfclock, rflisten433, rftest princeton433 or princeton <Hz>, sublist /subghz, subinspect or subdump /subghz/file.sub, appsdiag, APP_PUT");
             used=0;overflow=false;
         } else if(!overflow&&c>=32&&c<=126&&size_t(used)+1<sizeof(command))command[used++]=c;
         else overflow=true;
