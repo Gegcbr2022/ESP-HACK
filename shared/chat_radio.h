@@ -23,10 +23,10 @@ static const uint8_t chat_radio_registers[] = {
 #define CHAT_RADIO_REGISTER_BYTES (sizeof(chat_radio_registers))
 /* These are laboratory choices, not a declaration of legality in any country. */
 static const uint32_t chat_radio_frequencies[] = {433920000u, 868350000u};
-/* Typical datasheet PA entries; actual conducted/ERP power requires measurement. */
+/* TI SWRS061I table39, multilayer inductors; conducted/ERP power still needs measurement. */
 static inline uint8_t chat_radio_pa(uint32_t frequency, uint8_t power_index) {
     static const uint8_t pa433[] = {0x34, 0x60, 0xC0}; /* -10, 0, +10dBm nominal */
-    static const uint8_t pa868[] = {0x27, 0x50, 0xC0};
+    static const uint8_t pa868[] = {0x27, 0x50, 0xC2};
     return (frequency < 600000000u ? pa433 : pa868)[power_index > 2 ? 0 : power_index];
 }
 #endif

@@ -145,6 +145,7 @@ static bool fuzz_and_profile(void) {
     CHECK(CHAT_RADIO_REGISTER_BYTES % 2 == 0);
     for(size_t i = 0; i < CHAT_RADIO_REGISTER_BYTES; i += 2) CHECK(chat_radio_registers[i] > 0 && chat_radio_registers[i] <= 0x2E);
     CHECK(chat_radio_pa(433920000, 0) == 0x34); CHECK(chat_radio_pa(868350000, 0) == 0x27);
+    CHECK(chat_radio_pa(433920000, 2) == 0xC0); CHECK(chat_radio_pa(868350000, 2) == 0xC2);
     return true;
 }
 int main(void) {
