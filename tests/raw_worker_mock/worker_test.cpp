@@ -106,6 +106,22 @@ int main(){
     reset();state.rawThresholdAuto=true;delayUs=100000;CHECK(!prepareRawThreshold());CHECK(clockUs<700000&&!state.rawThresholdReady&&rssiSamples<64);
     reset();state.rawThresholdAuto=true;clockUs=UINT32_MAX-100000;CHECK(prepareRawThreshold());CHECK(state.rawThresholdReady&&state.rawThresholdSamples==64);
 
+    // Both the actual initial factory and actual restart preserve multi-frame
+    // history bursts across a Princeton guard; advanced remains7ms.
+    for(bool history:{false,true})for(bool restart:{false,true}) {
+        reset();activeRawHistory=history;
+        TriggeredCapture configured=makeRawCandidate(0);
+        if(restart)CHECK(restartRawCandidate(configured));
+        prepareTriggered(configured);configured.poll(13100);
+        CHECK(configured.complete()==!history);
+        if(history) {
+            configured.pulse(11700,17800);configured.pulse(-300,18100);
+            configured.rssi(-60,18100);configured.poll(25100);
+            CHECK(!configured.complete()&&configured.size()==22);
+            configured.poll(48100);CHECK(configured.complete());
+        }
+    }
+
     int32_t output[128]={};uint32_t lastSample=0;
     // A real ISR edge ending during the RSSI transaction must be drained before
     // rssi() can poll an older edge and falsely complete at a7ms boundary.
