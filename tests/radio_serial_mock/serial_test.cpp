@@ -1,21 +1,55 @@
 // The runner injects actual production controller function bodies at the marker.
 // Arduino UART/UI/worker are doubles; no serial port or radio is accessed.
 #include "lab_service.h"
+#include "keyboard_model.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cstdarg>
 #include <string>
+#include <vector>
 using namespace research;
 static unsigned checks;
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"FAIL line%d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 bool inMenu=true,serialChatContext=false,serialChatListen=false,serialChatReported=false;
 bool serialChatCloseRequested=false,serialChatOpenPending=false;
+bool serialChatEditPending=false,serialChatEditing=false;
 ChatMode chatFormat=ChatMode::FlipperPlaintext;
 static LabSnapshot observed={};
 static unsigned pollDepth,maxDepth,uiCalls,sends,stops,restores,starts,history,diagnostics,stats,screens;
 static uint32_t startFrequency,startTimeout;static uint16_t sentDestination;
 static bool failStart;
+static unsigned editorCalls;static bool editorAccept=true;
+bool up,down,ok,back,holdOk,holdBack,holdUp,holdDown;
+enum { EUp=1,EDown=2,EOk=4,EBack=8,EHoldOk=16,EHoldBack=32,EHoldUp=64,EHoldDown=128 };
+static std::vector<unsigned> editorEvents;
+static std::vector<std::string> drawnText;
+static size_t eventAt;static unsigned uiFrames,uiClears;static uint32_t uiTime;
+static const uint16_t SH110X_WHITE=1,SH110X_BLACK=0;
+uint32_t millis(){return uiTime;}
+void input(){
+    CHECK(serialChatEditing);CHECK(eventAt<editorEvents.size());const unsigned e=editorEvents[eventAt++];uiTime+=7;
+    up=e&EUp;down=e&EDown;ok=e&EOk;back=e&EBack;
+    holdOk=e&EHoldOk;holdBack=e&EHoldBack;holdUp=e&EHoldUp;holdDown=e&EHoldDown;
+}
+bool frame(){++uiFrames;return true;}
+struct KeyboardDisplay {
+    void clearDisplay(){++uiClears;}
+    void fillRect(int x,int y,int w,int h,uint16_t){CHECK(x>=0&&y>=0&&w>0&&h>0&&x+w<=128&&y+h<=64);}
+    void drawFastHLine(int x,int y,int w,uint16_t){CHECK(x>=0&&y>=0&&w>0&&x+w<=128&&y<64);}
+    void display(){}
+} display;
+namespace ui_text {
+void draw(KeyboardDisplay&,int x,int y,const char* text,uint16_t=1,size_t=21,uint8_t=1){
+    CHECK(x>=0&&x<128&&y>=0&&y<64);drawnText.push_back(text);
+}
+}
+void footer(const char* text){
+    size_t glyphs=0;for(const unsigned char* p=reinterpret_cast<const unsigned char*>(text);*p;++p)if((*p&0xC0)!=0x80)++glyphs;
+    CHECK(glyphs<=21);drawnText.push_back(text);
+}
+static bool drawn(const char* text){for(const std::string& s:drawnText)if(s==text)return true;return false;}
+static void editorScript(std::initializer_list<unsigned> events){editorEvents=events;eventAt=0;drawnText.clear();uiFrames=uiClears=0;}
 struct MockSerial {
     std::string input,output;size_t offset=0;
     size_t available()const{return input.size()-offset;}
@@ -45,6 +79,14 @@ bool pollSerialChatListen(){return true;}
 bool handleIdleSerialCommand(const char*){++diagnostics;return true;}
 void radioLabSerialPoll();void radioLabHandlePending();
 static void runPoll(){++pollDepth;if(pollDepth>maxDepth)maxDepth=pollDepth;radioLabSerialPoll();--pollDepth;}
+void resetInput(){}
+bool textEntry(const char*,char* draft,size_t capacity){
+    CHECK(pollDepth==0);CHECK(!serialChatEditing);CHECK(capacity==161&&draft[0]==0);++editorCalls;
+    serialChatEditing=true;
+    if(Serial.available())runPoll();
+    serialChatEditing=false;std::strcpy(draft,"preview");
+    return editorAccept&&!serialChatCloseRequested;
+}
 void runSubGhzChat(){
     CHECK(pollDepth==0);CHECK(!inMenu);++uiCalls;
     serialChatContext=true;serialChatCloseRequested=false;
@@ -83,5 +125,48 @@ int main(){
     Serial.feed("rfclock\nscreen\nchatsend TEST123\n");runPoll();CHECK(diagnostics==diagnosticsBefore&&screens==1&&sends==101);
     serialChatContext=false;observed={};chatFormat=ChatMode::EspAck;observed.peer=0x1234;
     CHECK(simpleChatSend(0,"TEST123"));CHECK(sentDestination==0x1234);CHECK(simpleChatSend(0x4321,"TEST123"));CHECK(sentDestination==0x4321);
+    const unsigned sendsBeforeEditor=sends,editorsBefore=editorCalls;
+    Serial.feed("chatedit\n");runPoll();CHECK(!serialChatEditPending&&editorCalls==editorsBefore);
+    serialChatContext=true;observed.active=observed.connected=true;observed.mode=LabMode::Chat;
+    serialChatCloseRequested=false;
+    Serial.feed("chatedit\nchatedit\n");runPoll();CHECK(serialChatEditPending);CHECK(editorCalls==editorsBefore);
+    runChatEditorPreview();CHECK(!serialChatEditPending&&editorCalls==editorsBefore+1);CHECK(sends==sendsBeforeEditor);
+    CHECK(Serial.output.find("editor CLOSED accepted=1 length=7; no text sent")!=std::string::npos);
+    runChatEditorPreview();CHECK(editorCalls==editorsBefore+1);
+    serialChatEditing=true;Serial.feed("chatedit\n");runPoll();CHECK(!serialChatEditPending);serialChatEditing=false;
+    observed.connected=false;Serial.feed("chatedit\n");runPoll();CHECK(!serialChatEditPending);observed.connected=true;
+    observed.mode=LabMode::Monitor;Serial.feed("chatedit\n");runPoll();CHECK(!serialChatEditPending);observed.mode=LabMode::Chat;
+    observed.chatDiagnostic=true;Serial.feed("chatedit\n");runPoll();CHECK(!serialChatEditPending);observed.chatDiagnostic=false;
+    Serial.feed("chatedit\n");runPoll();CHECK(serialChatEditPending);editorAccept=false;
+    Serial.feed("chatedit\nscreen\nchatclose\n");runChatEditorPreview();
+    CHECK(editorCalls==editorsBefore+2&&!serialChatEditing&&!serialChatEditPending);
+    CHECK(serialChatCloseRequested&&!observed.active&&sends==sendsBeforeEditor&&maxDepth==1);
+    CHECK(Serial.output.find("editor CLOSED accepted=0 length=7; no text sent")!=std::string::npos);
+    serialChatEditPending=true;runChatEditorPreview();CHECK(!serialChatEditPending&&editorCalls==editorsBefore+2);
+    // Execute the actual production editor with deterministic button/display
+    // doubles, independently of the UART preview stub above.
+    serialChatContext=false;serialChatEditing=false;
+    struct Guarded {char before;char text[12];char after;} draft={'L',"seed",'R'};
+    editorScript({EDown,EOk,EHoldBack});
+    CHECK(!testedTextEntry("test",draft.text,sizeof draft.text));
+    CHECK(!std::strcmp(draft.text,"seed")&&draft.before=='L'&&draft.after=='R');
+    CHECK(!serialChatEditing&&uiFrames==uiClears);
+    CHECK(drawn("a")&&drawn("b")&&drawn("SP")&&drawn("<-")&&drawn(">>")&&drawn("OK"));
+    draft.text[0]=0;editorScript({EOk,EDown,EOk,EHoldOk});
+    CHECK(testedTextEntry("test",draft.text,sizeof draft.text));CHECK(!std::strcmp(draft.text,"ab"));
+    CHECK(eventAt==editorEvents.size()&&!serialChatEditing);
+    editorScript({EBack,EBack,EHoldOk});CHECK(testedTextEntry("test",draft.text,sizeof draft.text));CHECK(!draft.text[0]);
+    editorScript({EUp,EOk});CHECK(testedTextEntry("test",draft.text,sizeof draft.text));CHECK(!draft.text[0]);
+    editorScript({EUp,EUp,EUp,EUp,EOk,EHoldOk});
+    CHECK(testedTextEntry("test",draft.text,sizeof draft.text));CHECK(!std::strcmp(draft.text," "));
+    draft.text[0]=0;editorScript({EUp,EUp,EUp,EUp,EOk,EHoldOk});
+    CHECK(testedTextEntry("test",draft.text,sizeof draft.text,"0123456789"));CHECK(!draft.text[0]);CHECK(drawn("Пробел недоступен"));
+    editorScript({EHoldDown,EOk,EHoldOk});CHECK(testedTextEntry("test",draft.text,sizeof draft.text));CHECK(!std::strcmp(draft.text,"A"));
+    draft.text[0]=0;editorScript({EHoldUp,EOk,EHoldOk});CHECK(testedTextEntry("test",draft.text,sizeof draft.text));CHECK(!std::strcmp(draft.text,"0"));
+    char tiny[2]="";uiTime=UINT32_MAX-15;editorScript({EOk,EOk,EHoldOk});
+    CHECK(testedTextEntry("test",tiny,sizeof tiny));CHECK(!std::strcmp(tiny,"a"));CHECK(drawn("Поле заполнено"));
+    char large[162]="unchanged";editorScript({});CHECK(!testedTextEntry("test",large,sizeof large));CHECK(!std::strcmp(large,"unchanged"));
+    char unterminated[2]={'a','a'};CHECK(!testedTextEntry("test",unterminated,sizeof unterminated));CHECK(unterminated[0]=='a'&&unterminated[1]=='a');
+    std::strcpy(draft.text,"a");CHECK(!testedTextEntry("test",draft.text,sizeof draft.text,"0123456789"));CHECK(!std::strcmp(draft.text,"a"));
     std::printf("Radio serial controller: %u checks passed (actual extracted functions, UART/UI/worker doubles)\n",checks);
 }

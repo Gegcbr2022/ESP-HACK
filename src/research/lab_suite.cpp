@@ -13,6 +13,7 @@
 #include "file_page.h"
 #include "file_entry.h"
 #include "../interface/ui_text.h"
+#include "../interface/keyboard_model.h"
 #include "../../shared/flipper_chat_compat.h"
 #include "../../shared/chat_session.h"
 #include "../subghz.h"
@@ -54,6 +55,7 @@ uint32_t lastFrame;
 bool up, down, ok, back, holdOk, holdBack, holdUp, holdDown;
 bool serialChatContext, serialChatListen, serialChatReported, serialChatCloseRequested;
 bool serialChatOpenPending;
+bool serialChatEditPending, serialChatEditing;
 
 __attribute__((noinline)) void printChatStatus() {
     const LabSnapshot s=labSnapshot();
@@ -141,25 +143,82 @@ void message(const char* heading, const char* text) {
     resetInput();
 }
 bool textEntry(const char* heading, char* output, size_t capacity, const char* alphabet = nullptr) {
-    static const char keys[] = " abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-!?/@";
+    // Keep the existing ASCII character set. Alphabet pages group lowercase,
+    // uppercase and digits; caller-supplied numeric/filename alphabets stay exact.
+    static const char keys[] = " abcdefghijklmnopqrstuvwxyz._ABCDEFGHIJKLMNOPQRSTUVWXYZ-!0123456789?/@";
     if(!alphabet) alphabet = keys;
-    size_t key = 0, n = strlen(output), total = strlen(alphabet);
+    char draft[161];
+    if(!output || !capacity || capacity>sizeof(draft))return false;
+    const char* end=static_cast<const char*>(memchr(output,0,capacity));
+    if(!end)return false;
+    memcpy(draft,output,size_t(end-output)+1);
+    keyboard::Model editor(draft, capacity, alphabet, strlen(alphabet));
+    if(!editor.valid())return false;
+    struct EditingGuard {
+        bool previous;
+        EditingGuard():previous(serialChatEditing){serialChatEditing=true;}
+        ~EditingGuard(){serialChatEditing=previous;}
+    } editingGuard;
+    uint32_t fullNoticeAt=millis()-1500;
     resetInput();
-    while(true) {
+    while(editor.outcome()==keyboard::Outcome::Editing) {
         input();
-        if(up) key = (key + total - 1) % total;
-        if(down) key = (key + 1) % total;
-        if(ok && n + 1 < capacity) { output[n++] = alphabet[key]; output[n] = 0; }
-        if(back && n) output[--n] = 0;
-        if(holdOk) { resetInput(); return true; }
-        if(holdBack) { resetInput(); return false; }
+        if(holdBack)editor.cancel();
+        else if(holdOk)editor.accept();
+        else {
+            if(holdUp)editor.changePage(-1);else if(up)editor.move(-1);
+            if(holdDown)editor.changePage(1);else if(down)editor.move(1);
+            if(back)editor.erase();
+            if(ok && editor.activate()==keyboard::Result::Full)fullNoticeAt=millis();
+        }
+        if(editor.outcome()!=keyboard::Outcome::Editing)break;
         if(frame()) {
-            title(heading); line(2, output + (n > 20 ? n - 20 : 0));
-            char buf[40]; snprintf(buf, sizeof(buf), "UP/DOWN: [%c]  %u/%u", alphabet[key], unsigned(n), unsigned(capacity - 1)); line(4, buf);
-            if((millis()/500)%2)display.drawFastHLine(60,46,6,SH110X_WHITE);
-            footer("Держ.OK/BACK: да/нет"); display.display();
+            display.clearDisplay();
+            display.fillRect(0,0,128,11,SH110X_WHITE);
+            ui_text::draw(display,2,2,heading,SH110X_BLACK,13);
+            char counter[16];snprintf(counter,sizeof(counter),"%u/%u",unsigned(editor.length()),unsigned(capacity-1));
+            ui_text::draw(display,86,2,counter,SH110X_BLACK,7);
+            const char* preview=editor.tail(20);ui_text::draw(display,0,12,preview,SH110X_WHITE,20);
+            if((millis()/500)%2)display.drawFastHLine(strlen(preview)*6,20,5,SH110X_WHITE);
+            for(size_t i=0;i<32;++i) {
+                const keyboard::Cell cell=editor.cell(i);
+                if(cell.kind==keyboard::Kind::Empty)continue;
+                const int16_t x=(i%8)*16,y=22+(i/8)*8;
+                const bool selected=i==editor.selected();
+                if(selected)display.fillRect(x,y,16,8,SH110X_WHITE);
+                const char* label="";char glyph[2]={cell.character,0};
+                switch(cell.kind) {
+                case keyboard::Kind::Character:label=glyph;break;
+                case keyboard::Kind::Space:label="SP";break;
+                case keyboard::Kind::Delete:label="<-";break;
+                case keyboard::Kind::Next:label=">>";break;
+                case keyboard::Kind::Done:label="OK";break;
+                default:break;
+                }
+                const uint16_t ink=selected?SH110X_BLACK:SH110X_WHITE;
+                ui_text::draw(display,x+(strlen(label)==1?5:2),y,label,ink,2);
+                if(!cell.enabled)display.drawFastHLine(x+2,y+3,12,ink);
+            }
+            const keyboard::Cell selected=editor.cell(editor.selected());
+            char hint[64];
+            if(uint32_t(millis()-fullNoticeAt)<1500)snprintf(hint,sizeof(hint),"Поле заполнено");
+            else if(selected.kind==keyboard::Kind::Space)snprintf(hint,sizeof(hint),"%s",selected.enabled?"OK: пробел":"Пробел недоступен");
+            else if(selected.kind==keyboard::Kind::Delete)snprintf(hint,sizeof(hint),"%s",selected.enabled?"OK: стереть символ":"Нечего стирать");
+            else if(selected.kind==keyboard::Kind::Next) {
+                if(selected.enabled)snprintf(hint,sizeof(hint),"OK: страница %u/%u",unsigned(editor.page()+1),unsigned(editor.pages()));
+                else snprintf(hint,sizeof(hint),"Одна страница");
+            }
+            else if(selected.kind==keyboard::Kind::Done)snprintf(hint,sizeof(hint),"OK: готово");
+            else if((millis()/2500)%3==0)snprintf(hint,sizeof(hint),"UP/DN: выбор OK: ввод");
+            else if((millis()/2500)%3==1)snprintf(hint,sizeof(hint),"Держ.OK/BACK:да/нет");
+            else snprintf(hint,sizeof(hint),"Держ.UP/DN:стр.%u/%u",unsigned(editor.page()+1),unsigned(editor.pages()));
+            footer(hint);display.display();
         }
     }
+    resetInput();
+    const bool accepted=editor.outcome()==keyboard::Outcome::Accepted;
+    if(accepted)memcpy(output,draft,editor.length()+1);
+    return accepted;
 }
 bool validLeaf(const char* name) {
     if(!name || !*name || *name == '.' || strlen(name) > 48) return false;
@@ -726,6 +785,17 @@ bool simpleChatSend(uint16_t recipient,const char* text) {
     if(!labQueueText(text,destination))return false;
     addHistory(destination,true,text);return true;
 }
+__attribute__((noinline)) void runChatEditorPreview() {
+    if(!serialChatEditPending)return;
+    serialChatEditPending=false;
+    if(!serialChatContext || serialChatCloseRequested)return;
+    // Called only after the UART parser frame has returned. This diagnostic
+    // draft is always discarded; accepting the editor cannot request RF TX.
+    char draft[161]="";
+    const bool accepted=textEntry("Текст (ASCII)",draft,sizeof(draft));
+    Serial.printf("[Chat] editor CLOSED accepted=%u length=%u; no text sent\n",accepted,unsigned(strlen(draft)));
+    resetInput();
+}
 int chatSendMenu(uint16_t& recipient) {
     static const char* choices[]={"Написать текст","Привет (Hello)","Тест TEST123","Ответ OK","Дополнительно"};
     static const char* wireText[]={"","Hello","TEST123","OK",""};
@@ -761,12 +831,15 @@ void chatApp(){
     settings=automaticSettings;radio=automatic;profile=TxProfile::ShieldedLab;powerIndex=1;chatFormat=ChatMode::FlipperPlaintext;
     const bool started=startMode(LabMode::Chat);
     if(started) {
-        serialChatContext=true;serialChatCloseRequested=false;historySize=historyNext=0;
+        serialChatContext=true;serialChatCloseRequested=false;serialChatEditPending=false;historySize=historyNext=0;
         uint16_t recipient=0;size_t selected=0,offset=0;bool queueError=false;resetInput();
         while(true) {
             input();uint16_t source;char received[161];
             while(labReceiveMessage(source,received,sizeof(received))){addHistory(source,false,received);selected=offset=0;queueError=false;}
             if(back||holdBack)break;
+            if(serialChatEditPending) {
+                runChatEditorPreview();continue;
+            }
             if(up&&historySize){if(offset)offset=0;else if(selected+1<historySize){++selected;offset=0;}}
             if(down&&historySize) {
                 const History& h=history[(historyNext+8-1-selected)%8];
@@ -796,7 +869,7 @@ void chatApp(){
             }
         }
         while(!labStop()){showNotice("Waiting for chat radio stop");delay(10);}
-        serialChatContext=false;serialChatCloseRequested=false;resetInput();
+        serialChatContext=false;serialChatCloseRequested=false;serialChatEditPending=false;resetInput();
     }
     settings=savedSettings;radio=savedRadio;profile=savedProfile;powerIndex=savedPower;chatFormat=savedMode;
 }
@@ -1087,6 +1160,11 @@ void radioLabSerialPoll() {
                 else if(simpleChatSend(0,"TEST123"))Serial.println("[Chat] queued TEST123; RF completion pending");
                 else printSerialChatQueueFailure();
             }
+            else if(!strcmp(command,"chatedit")) {
+                if(serialChatEditPending || serialChatEditing || !serialChatCanSend())
+                    Serial.println("[Chat] ERROR chatedit requires an active chat UI without an editor");
+                else {serialChatEditPending=true;Serial.println("[Chat] editor request queued; no text send");}
+            }
             else if(!strcmp(command,"chatclose")) {
                 if(!serialChatContext)Serial.println("[Chat] ERROR no chat UI is open");
                 else {serialChatCloseRequested=true;research::labRequestStop();Serial.println("[Chat] close requested");}
@@ -1095,9 +1173,9 @@ void radioLabSerialPoll() {
             else if(!strcmp(command,"screen"))printSerialScreen();
             else if(!strcmp(command,"chatstop")) {research::labRequestStop();Serial.println("[Chat] stop requested");}
             else if(!strncmp(command,"chatlisten ",11))startSerialChatListen(command);
-            else if((serialChatContext||serialRadioWorkerActive())&&used)Serial.println("[Chat] busy: use chatstat, screen, chatsend TEST123, chatclose or chatstop");
+            else if((serialChatContext||serialRadioWorkerActive())&&used)Serial.println("[Chat] busy: use chatstat, screen, chatedit, chatsend TEST123, chatclose or chatstop");
             else if(handleIdleSerialCommand(command)){}
-            else if(used)Serial.println("[RadioLab] commands: chatopen, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfcal, rfcal ppm <signed decimal>, rfclock, rflisten433, rftest princeton433, sublist /subghz, subinspect /subghz/file.sub, appsdiag, APP_PUT");
+            else if(used)Serial.println("[RadioLab] commands: chatopen, chatedit, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfcal, rfcal ppm <signed decimal>, rfclock, rflisten433, rftest princeton433, sublist /subghz, subinspect /subghz/file.sub, appsdiag, APP_PUT");
             used=0;overflow=false;
         } else if(!overflow&&c>=32&&c<=126&&size_t(used)+1<sizeof(command))command[used++]=c;
         else overflow=true;

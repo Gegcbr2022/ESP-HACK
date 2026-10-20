@@ -26,8 +26,9 @@ def function(name):
             depth-=1
             if not depth:return source[match.start():opening+token.end()]
     raise RuntimeError("Unclosed production function: "+name)
-names=("currentChatPeer","simpleChatSend","serialRadioWorkerActive","serialChatMainIdle","serialChatCanSend","serialChatListenFrequency","startSerialChatListen","radioLabSerialPoll","radioLabHandlePending")
+names=("currentChatPeer","simpleChatSend","runChatEditorPreview","serialRadioWorkerActive","serialChatMainIdle","serialChatCanSend","serialChatListenFrequency","startSerialChatListen","radioLabSerialPoll","radioLabHandlePending")
 controller="\n\n".join(function(name) for name in names)
+controller += "\n\n"+function("textEntry").replace("bool textEntry(","bool testedTextEntry(",1)
 main=(root/"src/main.cpp").read_text(encoding="utf-8")
 loop=main[main.index("void loop() {"):]
 if not re.match(r"void loop\(\) \{\s*if\(inMenu\) \{\s*radioLabSerialPoll\(\);\s*radioLabHandlePending\(\);\s*\}",loop):
@@ -39,7 +40,7 @@ with tempfile.TemporaryDirectory(prefix="esp-hack-radio-serial-") as directory:
     command=[compiler]
     zig=Path(compiler).name.lower() in ("zig","zig.exe")
     if zig:command.append("c++")
-    command += ["-std=c++11","-Wall","-Wextra","-Werror","-O1","-fno-inline","-I",str(root/"src/research"),str(generated),str(root/"src/research/radio_config.cpp"),"-o",str(binary)]
+    command += ["-std=c++11","-Wall","-Wextra","-Werror","-O1","-fno-inline","-I",str(root/"src/research"),"-I",str(root/"src/interface"),str(generated),str(root/"src/research/radio_config.cpp"),"-o",str(binary)]
     if not zig:command.insert(1,"-fstack-usage")
     subprocess.run(command,check=True);subprocess.run([str(binary)],check=True)
     if not zig:
