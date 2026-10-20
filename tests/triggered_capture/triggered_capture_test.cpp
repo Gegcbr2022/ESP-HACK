@@ -15,6 +15,7 @@ static void startBurst(TriggeredCapture& c, uint32_t& now, size_t intervals = 22
     feed(c, now, -17); // partial interval at arming is never a valid waveform.
     c.rssi(-70, now);
     for(size_t i = 0; i < intervals; ++i) feed(c, now, i & 1 ? -100 : 100);
+    c.rssi(-70, now); // a second real observation, not a single RSSI spike
 }
 static bool noise_inactive_and_pretrigger(void) {
     int32_t out[256]; memset(out, 0, sizeof(out)); uint32_t now = 0;
@@ -37,7 +38,8 @@ static bool noise_inactive_and_pretrigger(void) {
     CHECK(ring.size() == 63 && out[0] == input[17]);
     for(size_t i = 0; i < 63; ++i) CHECK(out[i] == input[i + 17]);
     ring.poll(now + 6999); CHECK(!ring.complete());
-    ring.poll(now + 7000); CHECK(ring.complete());
+    ring.poll(now + 7000);
+    CHECK(!ring.complete()&&!ring.triggered()&&ring.size()==0&&ring.rearmCount()==1);
     return true;
 }
 static bool minimum_gap_and_wrap(void) {
@@ -206,10 +208,106 @@ static bool full_and_corruption(void) {
     dirty_pre.rssi(-70, now); CHECK(dirty_pre.triggered() && !dirty_pre.complete() && dirty_pre.dropped() == 1);
     return true;
 }
+static bool post_gate_qualification(void) {
+    int32_t out[256];
+    // Arbitrarily long weak prehistory plus one strong RSSI observation must
+    // not qualify, even when many additional noise edges follow that spike.
+    const unsigned noiseAfter[]={0,1,19,20,48,64};
+    for(size_t trial=0;trial<sizeof noiseAfter/sizeof noiseAfter[0];++trial) {
+        uint32_t now=0xFFFF0000u;TriggeredCapture c(out,256,-78,now);
+        feed(c,now,-17);
+        for(unsigned i=0;i<1000;++i) {feed(c,now,i&1?-50:50);c.rssi(-88,now);}
+        CHECK(!c.triggered()&&c.size()==0);
+        c.rssi(-60,now);const size_t context=c.size();
+        CHECK(context>=63&&c.postTriggerPulses()==0&&!c.rssiQualified());
+        for(unsigned i=0;i<noiseAfter[trial];++i)feed(c,now,i&1?-50:50);
+        CHECK(c.postTriggerPulses()==noiseAfter[trial]);
+        c.rssi(-88,now);c.poll(now+7000);
+        CHECK(!c.complete()&&!c.triggered()&&c.size()==0&&c.rearmCount()==1);
+        CHECK(c.discardedShort()==context+noiseAfter[trial]);
+        now+=7000;startBurst(c,now,24);c.rssi(-88,now);c.poll(now+7000);
+        CHECK(c.complete()&&c.postTriggerPulses()==24&&c.rssiQualified());
+    }
+    // Sustained RSSI alone cannot turn 64 old noise intervals into a signal.
+    uint32_t now=100;TriggeredCapture old(out,256,-90,now);feed(old,now,-17);
+    for(unsigned i=0;i<80;++i)feed(old,now,i&1?-10:10);
+    old.rssi(-70,now);old.rssi(-70,now+1000);
+    CHECK(old.rssiQualified()&&old.postTriggerPulses()==0);
+    old.rssi(-110,now+1001);old.poll(now+8001);
+    CHECK(!old.complete()&&old.rearmCount()==1);
+
+    // With independently sustained RSSI, every count below20 still rejects;
+    // exactly20 succeeds even with a full64-interval weak noise prefix.
+    for(unsigned count=0;count<=20;++count) {
+        now=100;TriggeredCapture minimum(out,256,-90,now);feed(minimum,now,-17);
+        for(unsigned i=0;i<80;++i)feed(minimum,now,i&1?-10:10);
+        minimum.rssi(-70,now);const uint32_t began=now;
+        for(unsigned i=0;i<count;++i)feed(minimum,now,i&1?-100:100);
+        if(now-began<1000)now=began+1000;
+        minimum.rssi(-70,now);
+        CHECK(minimum.rssiQualified()&&minimum.postTriggerPulses()==count);
+        minimum.rssi(-110,now);minimum.poll(now+7000);
+        CHECK(minimum.complete()==(count==20));
+        CHECK(minimum.rearmCount()==(count<20?1u:0u));
+    }
+
+    // Exactly 20 post-gate ended intervals and a second strong observation at
+    // 1000us qualify; 999us and duplicate observations do not. Cross micros wrap.
+    now=0xFFFFFE00u;TriggeredCapture boundary(out,256,-90,now);feed(boundary,now,-17);
+    const uint32_t gate=now;boundary.rssi(-70,gate);boundary.rssi(-70,gate);
+    for(unsigned i=0;i<20;++i)feed(boundary,now,i&1?-25:25);
+    boundary.rssi(-70,gate+999);
+    CHECK(boundary.postTriggerPulses()==20&&!boundary.rssiQualified());
+    boundary.rssi(-70,gate+1000);CHECK(boundary.rssiQualified());
+    boundary.rssi(-110,gate+1001);boundary.poll(gate+8001);CHECK(boundary.complete());
+
+    // Deferred weak edges qualify only if a later strong sample confirms the
+    // short dip. A manual stop must not use an unconfirmed weak tail to reach20.
+    now=0;TriggeredCapture dip(out,256,-90,now);startBurst(dip,now,18);
+    CHECK(dip.postTriggerPulses()==18&&dip.rssiQualified());
+    dip.rssi(-110,now);feed(dip,now,200);feed(dip,now,-200);
+    CHECK(dip.postTriggerPulses()==18);
+    dip.rssi(-70,now);CHECK(dip.postTriggerPulses()==20);
+    dip.rssi(-110,now);dip.poll(now+7000);CHECK(dip.complete());
+    now=0;TriggeredCapture stop(out,256,-90,now);startBurst(stop,now,18);
+    stop.rssi(-110,now);feed(stop,now,200);feed(stop,now,-200);stop.stop(now);
+    CHECK(!stop.complete()&&stop.size()==20&&stop.postTriggerPulses()==18);
+
+    // Queued intervals ending before the sampled gate time are context even
+    // if delivered by the worker after that sample (absolute ISR timestamps).
+    TriggeredCapture delayed(out,256,-90,0);delayed.pulse(-17,17);delayed.rssi(-70,5000);
+    for(unsigned i=0;i<20;++i)delayed.pulse(i&1?-100:100,117+i*100);
+    CHECK(delayed.size()==20&&delayed.postTriggerPulses()==0);
+    delayed.stop(6000);CHECK(!delayed.complete());
+
+    // Independent Princeton A53A53/TE390 and CAME12 A53/TE320 bit timings:
+    // both have >=20 post-gate intervals and survive normal sampled RSSI dips.
+    const unsigned bits[]={24,12};const uint32_t key[]={0xA53A53,0xA53};
+    for(unsigned protocol=0;protocol<2;++protocol) {
+        now=0xFFFF0000u;TriggeredCapture real(out,256,-90,now);feed(real,now,-17);
+        real.rssi(-70,now);
+        for(unsigned bit=0;bit<bits[protocol];++bit) {
+            const bool one=(key[protocol]>>(bits[protocol]-1-bit))&1u;
+            const int32_t te=protocol?320:390;
+            feed(real,now,one?(protocol?640:1170):te);
+            feed(real,now,-(one?te:(protocol?640:1170)));
+            if((bit&1)==1)real.rssi(-70,now);
+        }
+        CHECK(real.postTriggerPulses()==bits[protocol]*2&&real.rssiQualified());
+        real.rssi(-110,now);real.poll(now+7000);
+        CHECK(real.complete()&&real.size()==bits[protocol]*2);
+        for(size_t i=0;i<real.size();++i)CHECK((out[i]>0)==!(i&1));
+    }
+    // Active corruption remains terminal even with otherwise qualified signal.
+    now=0;TriggeredCapture corrupt(out,256,-90,now);startBurst(corrupt,now,24);
+    corrupt.integrity(0,1);corrupt.rssi(-110,now);corrupt.poll(now+7000);
+    CHECK(corrupt.phase()==TriggeredCapture::Phase::Corrupt&&corrupt.rejected()==1&&corrupt.rearmCount()==0);
+    return true;
+}
 int main() {
     if(!noise_inactive_and_pretrigger() || !minimum_gap_and_wrap() || !short_rssi_dip_and_tail() ||
        !deferred_overflow_and_stop() || !full_and_corruption() || !startup_gate() ||
-       !clean_armed_recovery() || !short_candidate_rearms()) return 1;
-    printf("triggered_capture: PASS (%u checks; startup median/deadline, armed recovery, short-burst rearm, bounds, active corruption)\n", checks);
+       !clean_armed_recovery() || !short_candidate_rearms() || !post_gate_qualification()) return 1;
+    printf("triggered_capture: PASS (%u checks; startup median/deadline, post-gate/RSSI qualification, armed recovery, bounds, corruption)\n", checks);
     return 0;
 }

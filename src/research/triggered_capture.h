@@ -12,16 +12,17 @@ public:
     static const size_t kPretrigger = 64;
     static const size_t kMinimumPulses = 20;
     static const uint32_t kQuietUs = 7000;
+    static const uint32_t kStrongSpanUs = 1000;
 
     TriggeredCapture(int32_t* output, size_t capacity, int16_t threshold, uint32_t startedUs)
-        : output_(output), capacity_(capacity), used_(0), threshold_(threshold),
+        : output_(output), capacity_(capacity), used_(0), postTriggerPulses_(0), threshold_(threshold),
           phase_(output && capacity ? Phase::Armed : Phase::Corrupt), head_(0), queued_(0),
           pendingTotal_(0), pendingLost_(0), discardedTail_(0), rawDropped_(0),
           rawRejected_(0), badSamples_(0), lostSamples_(0), droppedBase_(0), rejectedBase_(0),
           discardedArmingDropped_(0), discardedArmingRejected_(0), discardedShort_(0),
-          rearms_(0), lastEdge_(startedUs), weakSince_(0), preQuietSince_(0),
+          rearms_(0), lastEdge_(startedUs), weakSince_(0), preQuietSince_(0), triggeredAt_(startedUs),
           first_(true), previousPositive_(false), strong_(false), triggered_(false),
-          preQuiet_(false), waitForWeak_(false) {}
+          preQuiet_(false), waitForWeak_(false), rssiQualified_(false) {}
 
     void integrity(uint32_t dropped, uint32_t rejected) {
         const uint32_t nextDropped = dropped - droppedBase_;
@@ -44,8 +45,10 @@ public:
         }
         if(positive == previousPositive_) { reject(); return; }
         previousPositive_ = positive;
-        if(phase_ == Phase::Armed || !strong_) remember(value);
-        else append(value);
+        const bool afterTrigger = phase_ == Phase::Capturing &&
+                                  uint32_t(edgeUs - triggeredAt_) < 0x80000000UL;
+        if(phase_ == Phase::Armed || !strong_) remember(value, afterTrigger);
+        else append(value, afterTrigger);
     }
 
     void rssi(int16_t dbm, uint32_t nowUs) {
@@ -67,10 +70,13 @@ public:
             if(waitForWeak_) return;
             triggered_ = true;
             if(rawDropped_ || rawRejected_ || badSamples_) { phase_ = Phase::Corrupt; return; }
-            phase_ = Phase::Capturing; strong_ = true;
-            flush(); // Preserve up to64 preceding ended intervals, in time order.
+            phase_ = Phase::Capturing; strong_ = true; triggeredAt_ = nowUs;
+            flush(false); // Prehistory is context, never evidence of a new signal.
             return;
         }
+        // A single RSSI spike must not validate even a dense demodulator-noise
+        // burst. Require a later strong observation at least 1ms after the gate.
+        if(strong && uint32_t(nowUs - triggeredAt_) >= kStrongSpanUs) rssiQualified_ = true;
         if(strong && !strong_) {
             // A short RSSI dip is part of the same burst. Every deferred interval
             // must survive; otherwise the capture is explicitly damaged.
@@ -87,13 +93,13 @@ public:
         if(phase_ != Phase::Capturing) return;
         if(!strong_) {
             if(uint32_t(nowUs - weakSince_) < kQuietUs) return;
-            if(used_ < kMinimumPulses) { rearmShort(nowUs, true); return; }
+            if(!qualified()) { rearmShort(nowUs, true); return; }
             // RSSI stayed below threshold for the entire guard interval. This
             // explicitly excludes the deferred demodulator-noise tail, even if
             // its ring wrapped. Count all exclusions, rather than hide them.
             discardedTail_ += pendingTotal_; clearPending(); phase_ = Phase::Complete;
         } else if(uint32_t(nowUs - lastEdge_) >= kQuietUs) {
-            if(used_ < kMinimumPulses) rearmShort(nowUs, false);
+            if(!qualified()) rearmShort(nowUs, false);
             else phase_ = Phase::Complete;
         }
     }
@@ -104,9 +110,9 @@ public:
         poll(nowUs);
         if(phase_ == Phase::Capturing) {
             if(pendingLost_) { lostSamples_ += pendingLost_; phase_ = Phase::Corrupt; return; }
-            flush();
+            flush(false); // Unconfirmed weak-RSSI tail cannot qualify a signal.
             if(phase_ == Phase::Capturing)
-                phase_ = used_ >= kMinimumPulses ? Phase::Complete : Phase::Stopped;
+                phase_ = qualified() ? Phase::Complete : Phase::Stopped;
         } else if(phase_ == Phase::Armed) phase_ = Phase::Stopped;
     }
 
@@ -118,6 +124,8 @@ public:
     bool complete() const { return phase_ == Phase::Complete; }
     bool full() const { return phase_ == Phase::Full; }
     size_t size() const { return used_; }
+    size_t postTriggerPulses() const { return postTriggerPulses_; }
+    bool rssiQualified() const { return rssiQualified_; }
     uint32_t dropped() const { return rawDropped_ + lostSamples_; }
     uint32_t rejected() const { return rawRejected_ + badSamples_; }
     uint32_t discardedTail() const { return discardedTail_; }
@@ -127,6 +135,7 @@ public:
     uint32_t rearmCount() const { return rearms_; }
 
 private:
+    bool qualified() const { return postTriggerPulses_ >= kMinimumPulses && rssiQualified_; }
     void reject() {
         ++badSamples_;
         if(phase_ == Phase::Capturing) phase_ = Phase::Corrupt;
@@ -144,45 +153,51 @@ private:
     void rearmShort(uint32_t nowUs, bool weakQuiet) {
         if(pendingLost_) { lostSamples_ += pendingLost_; phase_ = Phase::Corrupt; return; }
         discardedShort_ += uint32_t(used_) + pendingTotal_; ++rearms_;
-        used_ = 0; clearPending(); first_ = true; previousPositive_ = false;
+        used_ = postTriggerPulses_ = 0; rssiQualified_ = false;
+        clearPending(); first_ = true; previousPositive_ = false;
         phase_ = Phase::Armed; strong_ = triggered_ = false;
         lastEdge_ = nowUs; preQuiet_ = weakQuiet; preQuietSince_ = nowUs;
         // An unmodulated strong carrier cannot continually retrigger an empty
         // candidate. Require a real weak-RSSI boundary before accepting more.
         waitForWeak_ = !weakQuiet;
     }
-    void remember(int32_t value) {
-        pre_[head_] = value; head_ = (head_ + 1) % kPretrigger;
+    void remember(int32_t value, bool afterTrigger) {
+        pre_[head_] = value; preQualifies_[head_] = afterTrigger;
+        head_ = (head_ + 1) % kPretrigger;
         if(queued_ < kPretrigger) ++queued_;
         else if(phase_ == Phase::Capturing) ++pendingLost_;
         ++pendingTotal_;
     }
-    void append(int32_t value) {
+    void append(int32_t value, bool qualifies) {
         if(phase_ != Phase::Capturing) return;
         if(!used_ && value < 0) return; // Flipper RAW begins with a HIGH interval.
         if(used_ && (output_[used_ - 1] > 0) == (value > 0)) { reject(); return; }
         if(used_ >= capacity_) { phase_ = Phase::Full; return; }
         output_[used_++] = value;
+        if(qualifies) ++postTriggerPulses_;
         if(used_ == capacity_) phase_ = Phase::Full;
     }
     void clearPending() { head_ = queued_ = 0; pendingTotal_ = pendingLost_ = 0; }
-    void flush() {
+    void flush(bool allowQualification = true) {
         const size_t start = (head_ + kPretrigger - queued_) % kPretrigger;
-        for(size_t i = 0; i < queued_ && phase_ == Phase::Capturing; ++i)
-            append(pre_[(start + i) % kPretrigger]);
+        for(size_t i = 0; i < queued_ && phase_ == Phase::Capturing; ++i) {
+            const size_t index = (start + i) % kPretrigger;
+            append(pre_[index], allowQualification && preQualifies_[index]);
+        }
         clearPending();
     }
 
     int32_t* output_;
-    size_t capacity_, used_;
+    size_t capacity_, used_, postTriggerPulses_;
     int16_t threshold_;
     Phase phase_;
     int32_t pre_[kPretrigger];
+    bool preQualifies_[kPretrigger];
     size_t head_, queued_;
     uint32_t pendingTotal_, pendingLost_, discardedTail_;
     uint32_t rawDropped_, rawRejected_, badSamples_, lostSamples_, droppedBase_, rejectedBase_;
     uint32_t discardedArmingDropped_, discardedArmingRejected_, discardedShort_, rearms_;
-    uint32_t lastEdge_, weakSince_, preQuietSince_;
-    bool first_, previousPositive_, strong_, triggered_, preQuiet_, waitForWeak_;
+    uint32_t lastEdge_, weakSince_, preQuietSince_, triggeredAt_;
+    bool first_, previousPositive_, strong_, triggered_, preQuiet_, waitForWeak_, rssiQualified_;
 };
 }
