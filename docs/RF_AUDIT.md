@@ -51,15 +51,20 @@ Standard Read cannot decode arbitrary signals; use RAW for timing capture.
 ## Driver and radio configuration findings
 
 The retained SmartRC 3.0.2 driver uses SPI mode 0 at 4 MHz and assumes a 26 MHz
-crystal. It supplies SPI transactions and a 200 ms MISO-ready timeout. Its public
-API does not expose the timeout result: reads may return zero and writes may be
-silently skipped. Register readback failures are therefore error evidence, not a
-count of every electrical SPI fault. A logical state timeout can exceed its
-nominal 20 ms because a driver SPI call can itself wait up to 200 ms.
+crystal. Upstream supplies SPI transactions and a 200 ms MISO-ready timeout but
+does not expose the timeout result: reads may return zero and writes may be
+silently skipped. The release vendors that driver with narrow audited patches:
+the ready deadline is 5 ms, failed reads are cleared, transactions release CS,
+initialization aborts on a ready failure and `spiTimeouts()` exposes a cumulative
+counter. See `lib/SmartRC-CC1101/ESPHACK_PATCHES.md` for reset timing, fault
+semantics and mock coverage. Register readback failures are separate error
+evidence, not a count of every electrical SPI fault. A logical state timeout can
+slightly exceed its nominal 20 ms while its final SPI operation finishes.
 
 Chip detection reads VERSION and rejects 00/FF. Diagnostics log PARTNUM,
 VERSION, MARCSTATE, actual fixed pins, selected frequency, configuration readback
-errors and FIFO recovery count. VERSION alone does not certify a genuine chip.
+errors, driver ready timeouts and FIFO recovery count. VERSION alone does not
+certify a genuine chip.
 
 The AM270 receive profile explicitly sets:
 
@@ -189,6 +194,40 @@ compilation and physical timing verification must be reported separately.
 The phase-2 changes also compiled for SH1106 / ESP32 DevKit with the pinned
 espressif32 6.12.0 / Arduino 2.0.17 toolchain. RF/timing behavior remains physically
 unverified.
+
+## Legacy file inspection and Send
+
+The legacy browser now streams the entire file through the shared bounded `.sub`
+parser before accepting it; it does not stop at the first RAW_Data line or copy
+96 bytes of waveform as if complete. It rejects missing/unknown preset headers,
+invalid frequency/version, malformed pulse signs, duplicate/corrupt fields and
+unsupported shaping explicitly. Legacy inspection is capped at 1 MiB; larger
+files report a clear size error. Original recordings without a Preset header
+need a verified header added or a new capture; the loader does not guess one.
+
+RAW Play/Send opens the Radio Lab file view and finite RMT transmit path, which
+uses the file's actual frequency and validated OOK preset/custom configuration.
+The legacy GPIO RAW transmitter is no longer reachable through those actions.
+Both AM270 and AM650 decoded files retain their exact official register preset;
+unsupported custom shaping or non-OOK configurations do not become OOK silently.
+
+The existing legacy protocol-1 (Princeton/RcSwitch) and protocol-11 (CAME-labelled
+upstream) encoders remain available with the existing cap of six repeats. Only
+1..32-bit keys fitting their declared bit length and explicit valid TE values
+are accepted. The complete key packing is tested for the first frame and a
+subsequent shorter frame. Other protocol names fail clearly instead of taking
+the old protocol-11 fallback. Numeric timing bounds include pulse/sync factors
+plus a GPIO/scheduling margin and cannot exceed the five-second lab cap. The
+shared Radio Lab profile/channel/configured-duration policy must also permit the
+send; default receive-only operation never transmits. Legacy sends use nominal
+-10 dBm rather than an imported PA table. Power, edge jitter and wall duration
+still require physical measurement. The unchanged legacy encoders are blocking
+for their short bounded send; RMT RAW playback supplies the manual-stop path.
+
+`tests/portable/legacy_guard_tests.cpp` checks exact AM270/650 selection,
+unknown/custom/non-OOK and unsupported-protocol rejection, key packing and bit
+bounds, missing timing and the duration cap. These are host software tests, not
+successful RF interoperability measurements.
 
 ## Primary references
 

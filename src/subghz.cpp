@@ -8,6 +8,9 @@
 #include <RCSwitch.h>
 #include <math.h>
 #include "research/raw_capture.h"
+#include "research/legacy_guard.h"
+#include "research/lab_suite.h"
+#include "../shared/chat_radio.h"
 
 // CC1101
 #define DEFAULT_RF_FREQUENCY 433.92 // MHz
@@ -27,6 +30,7 @@ bool autoSave = false;
 int signals = 0;
 uint64_t lastSavedKey = 0;
 tpKeyData keyData1;
+static String legacyFileLoadError;
 bool isJamming = false;
 
 // Bruteforce state
@@ -204,6 +208,8 @@ float rawRecorderPeakRssi = -127.0f;
 unsigned long rawRecorderRssiSampleUs = 0;
 bool rawRecorderFrameDamaged = false;
 bool rawRecorderStorageFailed = false;
+bool rawRecorderDiscardFirstInterval = true;
+bool rawRecorderFileLastPositive = false;
 uint32_t rawRecorderSeenLosses = 0;
 uint32_t rawRecorderRejectedFrames = 0;
 uint32_t cc1101StateTimeouts = 0;
@@ -485,6 +491,12 @@ void runSubGHz() {
           bruteRunning = false;
           resetButtonStates();
           OLED_printBruteIntro();
+        } else if (menuIndex == 6) {
+          suspendLegacyReceive();
+          runRadioLab();
+          restoreReceiveMode();
+          resetButtonStates();
+          OLED_printSubGHzMenu(display, menuIndex);
         }
       }
       if (buttonBack.isClick()) {
@@ -676,7 +688,8 @@ void runSubGHz() {
         if (loadKeyFromSD(subExplorer.selectedFile, &keyData1)) {
           OLED_printKey(&keyData1, subExplorer.selectedFile);
         } else {
-          ExplorerShowSDError(display);
+          OLED_printError(legacyFileLoadError.length() ? legacyFileLoadError : F("Invalid .sub file"), true);
+          delay(1000);
           subExplorer.inExplorer = true;
           ExplorerDraw(subExplorer, display);
         }
@@ -956,11 +969,12 @@ void configureCC1101() {
   pinMode(cc1101GDO0Pin, INPUT);
   if (verified) ELECHOUSE_cc1101.SetRx();
   Serial.printf("[CC1101] part=%02X version=%02X GDO0=%u CS=%u freq=%.5f "
-                "preset=AM270 MARC=%02X SPIerr=%lu recovery=%lu\n",
+                "preset=AM270 MARC=%02X SPIerr=%lu readyTO=%lu recovery=%lu\n",
     ELECHOUSE_cc1101.SpiReadStatus(CC1101_PARTNUM),
     ELECHOUSE_cc1101.SpiReadStatus(CC1101_VERSION), cc1101GDO0Pin, cc1101CSPin,
     frequency, ELECHOUSE_cc1101.SpiReadStatus(CC1101_MARCSTATE),
     static_cast<unsigned long>(cc1101ReadbackErrors),
+    static_cast<unsigned long>(ELECHOUSE_cc1101.spiTimeouts()),
     static_cast<unsigned long>(cc1101FifoRecoveries));
 }
 
@@ -981,14 +995,11 @@ void read_rcswitch(tpKeyData* kd) {
   interrupts();
   if (!decoded || bitLength == 0 || bitLength > 32) return;
   memset(kd, 0, sizeof(*kd));
-  ++signals;
   kd->frequency = frequency;
   kd->bitLength = bitLength;
   kd->codeLenth = bitLength;
-  const unsigned int numBytes = (bitLength + 7) / 8;
-  for (unsigned int i = 0; i < numBytes; ++i) {
-    kd->keyID[7 - i] = (decoded >> (i * 8)) & 0xFF;
-  }
+  if (!research::packLegacyDecodedKey(decoded, bitLength, kd->keyID)) return;
+  ++signals;
   kd->type = (protocol == 1 && bitLength == 24) ? kPrinceton : kRcSwitch;
   if (protocol == 11 && bitLength <= 32) kd->type = kCAME;
   kd->te = pulseDelay;
@@ -1383,6 +1394,8 @@ bool startRawRecorderSession() {
   rawRecorderPeakRssi = -127.0f;
   rawRecorderFrameDamaged = false;
   rawRecorderStorageFailed = false;
+  rawRecorderDiscardFirstInterval = true;
+  rawRecorderFileLastPositive = false;
   rawRecorderSeenLosses = 0;
   rawRecorderRejectedFrames = 0;
   disableRcSwitchReceive();
@@ -1443,6 +1456,12 @@ bool saveRawFrameToSession() {
 
 void flushRawRecorderFrame() {
   rawRecorderLastRssi = rawRecorderPeakRssi;
+  if (rawRecorderEdgeCount && rawRecorderSavedCount &&
+      ((rawRecorderEdges[0] > 0) == rawRecorderFileLastPositive)) {
+    // Filtering/damage may remove whole frames. Never export a same-level join
+    // that violates Flipper RAW's global alternation rule.
+    rawRecorderFrameDamaged = true;
+  }
   if (rawRecorderFrameDamaged) {
     ++rawRecorderRejectedFrames;
     Serial.printf("[RAW] damaged frame rejected; total=%lu\n",
@@ -1450,7 +1469,10 @@ void flushRawRecorderFrame() {
   } else if (rawRecorderEdgeCount >= RAW_REC_MIN_EDGES &&
              // No in-burst RSSI sample is different from a weak measured burst.
              (rawRecorderPeakRssi <= -127.0f || rawRecorderPeakRssi >= rawRecorderRssiThreshold)) {
-    if (saveRawFrameToSession()) ++rawRecorderSavedCount;
+    if (saveRawFrameToSession()) {
+      ++rawRecorderSavedCount;
+      rawRecorderFileLastPositive = rawRecorderEdges[rawRecorderEdgeCount - 1] > 0;
+    }
   }
   rawRecorderEdgeCount = 0;
   rawRecorderPeakRssi = -127.0f;
@@ -1534,6 +1556,14 @@ void handleRawRecorderCapture() {
       Serial.println(F("[RAW] capture loss during storage/UI; frame rejected"));
       return;
     }
+    if (rawRecorderDiscardFirstInterval) {
+      // Capture may begin part-way through a HIGH or LOW interval.
+      rawRecorderDiscardFirstInterval = false;
+      continue;
+    }
+    // The first persisted Flipper RAW interval must be HIGH. Initial LOW idle
+    // time precedes the recorded waveform; do not invent a partial HIGH pulse.
+    if (!rawRecorderSavedCount && !rawRecorderEdgeCount && interval < 0 && !rawRecorderFrameDamaged) continue;
     const uint32_t duration = interval < 0 ? -interval : interval;
     if (!rawRecorderFrameDamaged) {
       if (rawRecorderEdgeCount < RAW_REC_MAX_EDGES) rawRecorderEdges[rawRecorderEdgeCount++] = interval;
@@ -1582,68 +1612,71 @@ bool saveKeyToSD(tpKeyData* kd) {
   return true;
 }
 
-bool loadKeyFromSD(String fileName, tpKeyData* kd) {
-  ensureSubExplorerDir();
-  File file = SD.open(subExplorer.currentDir + "/" + fileName, FILE_READ);
-  if (!file) {
-    Serial.print(F("Failed to open file: "));
-    Serial.println(fileName);
-    return false;
+static bool inspectLegacySubFile(const String& path, research::SubInfo& info) {
+  legacyFileLoadError = "";
+  File file = SD.open(path, FILE_READ);
+  if (!file) { legacyFileLoadError = F("SD file open failed"); return false; }
+  const uint32_t fileBytes = file.size();
+  if (!fileBytes || fileBytes > 1024UL * 1024UL) {
+    file.close(); legacyFileLoadError = F("File size unsupported"); return false;
   }
-  memset(kd, 0, sizeof(tpKeyData));
-  String line;
-  while (file.available()) {
-    line = file.readStringUntil('\n');
-    line.trim();
-    if (line.startsWith("Filetype:")) {
-      bool isKeyFile = line.equals("Filetype: Flipper SubGhz Key File");
-      bool isRawFile = line.equals("Filetype: Flipper SubGhz RAW File");
-      if (!isKeyFile && !isRawFile) {
-        file.close();
-        Serial.print(F("Invalid file format: "));
-        Serial.println(fileName);
-        return false;
-      }
-    } else if (line.startsWith("Frequency:")) {
-      kd->frequency = line.substring(10).toFloat() / 1000000.0;
-    } else if (line.startsWith("Protocol:")) {
-      String protocol = line.substring(9);
-      protocol.trim();
-      if (protocol == "Princeton") kd->type = kPrinceton;
-      else if (protocol == "RcSwitch") kd->type = kRcSwitch;
-      else if (protocol == "CAME") kd->type = kCAME;
-      else if (protocol == "NICE") kd->type = kNICE;
-      else if (protocol == "HOLTEK") kd->type = kHOLTEK;
-      else if (protocol == "KeeLoq") kd->type = kKeeLoq;
-      else if (protocol == "StarLine") kd->type = kStarLine;
-      else if (protocol == "RAW") kd->type = kLINEAR;
-      else kd->type = kUnknown;
-    } else if (line.startsWith("Bit:")) {
-      kd->bitLength = line.substring(4).toInt();
-      kd->codeLenth = kd->bitLength;
-    } else if (line.startsWith("Key:")) {
-      String keyStr = line.substring(4);
-      keyStr.trim();
-      keyStr.replace(" ", "");
-      for (int i = 0; i < keyStr.length() / 2 && i < 8; i++) {
-        String byteStr = keyStr.substring(i * 2, i * 2 + 2);
-        kd->keyID[i] = strtol(byteStr.c_str(), NULL, 16);
-      }
-    } else if (line.startsWith("TE:")) {
-      kd->te = line.substring(3).toInt();
-    } else if (line.startsWith("RAW_Data:")) {
-      String rawLine = line.substring(9);
-      rawLine.trim();
-      strncpy(kd->rawData, rawLine.c_str(), sizeof(kd->rawData) - 1);
-      kd->rawData[sizeof(kd->rawData) - 1] = '\0';
-      kd->type = kLINEAR;
-      kd->codeLenth = 1;
-      // RAW is transmitted directly from SD; do not load the whole file
-      // into a String while opening file information.
-      break;
-    }
+  research::SubParser parser;
+  uint8_t chunk[192];
+  uint32_t readBytes = 0;
+  bool valid = true;
+  while (readBytes < fileBytes && valid) {
+    const size_t count = file.read(chunk, sizeof(chunk));
+    if (!count) { valid = false; break; }
+    readBytes += count;
+    valid = parser.feed(reinterpret_cast<const char*>(chunk), count);
+    delay(1);
   }
   file.close();
+  valid = valid && readBytes == fileBytes && parser.finish();
+  if (!valid) {
+    legacyFileLoadError = parser.error() == research::SubError::UnsupportedPreset ?
+      F("Unknown .sub preset") : F("Invalid .sub: serial");
+    Serial.printf("[SUB] rejected %s line=%lu: %s (read %lu/%lu bytes)\n", path.c_str(),
+      static_cast<unsigned long>(parser.line()), parser.errorText(),
+      static_cast<unsigned long>(readBytes), static_cast<unsigned long>(fileBytes));
+    return false;
+  }
+  info = parser.info();
+  const char* reason = nullptr;
+  if (!research::legacyOokFile(info, &reason)) {
+    legacyFileLoadError = F("Needs async OOK");
+    Serial.printf("[SUB] legacy path rejected: %s\n", reason);
+    return false;
+  }
+  return true;
+}
+
+bool loadKeyFromSD(String fileName, tpKeyData* kd) {
+  ensureSubExplorerDir();
+  research::SubInfo info;
+  if (!inspectLegacySubFile(subExplorer.currentDir + "/" + fileName, info)) return false;
+  memset(kd, 0, sizeof(*kd));
+  kd->frequency = info.frequencyHz / 1000000.0f;
+  const research::RadioPreset* preset = research::findPreset(info.preset);
+  snprintf(kd->preset, sizeof(kd->preset), "%s", preset ? preset->name : "Custom");
+  kd->bitLength = info.bits;
+  kd->te = info.teUs;
+  for (uint8_t i = 0; i < info.keyBytes; ++i) kd->keyID[8 - info.keyBytes + i] = info.key[i];
+  if (info.kind == research::SubKind::Raw) {
+    kd->type = kLINEAR;
+    kd->codeLenth = 1; // Legacy UI validity flag, not a pulse count.
+  } else {
+    kd->codeLenth = info.bits > 255 ? 255 : info.bits;
+    if (!strcmp(info.protocol, "Princeton")) kd->type = kPrinceton;
+    else if (!strcmp(info.protocol, "RcSwitch")) kd->type = kRcSwitch;
+    else if (!strcmp(info.protocol, "CAME")) kd->type = kCAME;
+    else if (!strcmp(info.protocol, "NICE")) kd->type = kNICE;
+    else if (!strcmp(info.protocol, "HOLTEK")) kd->type = kHOLTEK;
+    else kd->type = kUnknown;
+  }
+  Serial.printf("[SUB] validated freq=%lu preset=%s protocol=%s pulses=%lu\n",
+    static_cast<unsigned long>(info.frequencyHz), info.preset, info.protocol,
+    static_cast<unsigned long>(info.raw.pulses));
   return true;
 }
 
@@ -2033,266 +2066,93 @@ static void rawPlaybackDelayMicroseconds(unsigned int durationUs) {
 }
 
 bool playRawRecorderFile(const String& fileName) {
-  rawPlaybackActive = false;
-  rawPlaybackStopRequestedFlag = false;
-  rawPlaybackOkWasPressed = false;
-  rawPlaybackBackWasPressed = false;
-  rawPlaybackBackPressedAt = 0;
-  rawPlaybackIgnoreOkRelease = false;
-  rawPlaybackIgnoreBackRelease = false;
-  rawPlaybackShownPct = 0.0f;
-  rawPlaybackTargetPct = 0.0f;
-  rawPlaybackStartMs = millis();
-  rawPlaybackLastDrawMs = 0;
-
-  if (fileName.length() == 0 || !SD.exists(fileName)) {
-    OLED_printError(F("No RAW file"), true);
-    delay(600);
+  research::SubInfo info;
+  if (!inspectLegacySubFile(fileName, info) || info.kind != research::SubKind::Raw) {
+    OLED_printError(legacyFileLoadError.length() ? legacyFileLoadError : F("Requires RAW file"), true);
+    delay(1000);
     return false;
   }
-
-  // RAW uses the GDO0 pin for transmission. Stop the receive interrupt
-  // before switching the CC1101 into TX mode.
-  disableRcSwitchReceive();
-
-  rawPlaybackActive = true;
-  rawPlaybackIgnoreOkRelease = digitalRead(BUTTON_OK) == LOW;
-  rawPlaybackIgnoreBackRelease = digitalRead(BUTTON_BACK) == LOW;
-  drawRawPlaybackWave(0, 0);
-  startRawPlaybackAnimationTask();
-
-  if (!initRfModule("tx", frequency)) {
-    stopRawPlaybackAnimationTask();
-    rawPlaybackActive = false;
-    OLED_printError(F("TX init fail"), true);
-    delay(800);
-    restoreReceiveMode();
-    return false;
-  }
-
-  ELECHOUSE_cc1101.setModulation(2);
-  ELECHOUSE_cc1101.setRxBW(270.0);
-  ELECHOUSE_cc1101.SpiWriteReg(CC1101_DEVIATN, 0);
-  ELECHOUSE_cc1101.setDRate(10);
-  ELECHOUSE_cc1101.setPA(12);
-  ELECHOUSE_cc1101.SetTx();
-  pinMode(bruceConfigPins.CC1101_bus.io0, OUTPUT);
-
-  File rawFile = SD.open(fileName, FILE_READ);
-  if (!rawFile) {
-    stopRawPlaybackAnimationTask();
-    rawPlaybackActive = false;
-    deinitRfModule();
-    restoreReceiveMode();
-    OLED_printError(F("Open failed"), true);
-    delay(600);
-    return false;
-  }
-
-  int sentBlocks = 0;
-  const uint32_t rawFileSize = rawFile.size();
-  bool foundRawBlock = false;
-
-  while (rawFile.available()) {
-    if (rawPlaybackStopRequested()) break;
-
-    String line = rawFile.readStringUntil('\n');
-    line.trim();
-    if (!line.startsWith("RAW_Data:")) continue;
-
-    String block = line.substring(9);
-    block.trim();
-    foundRawBlock = true;
-    // File position provides progress without a separate full SD pass.
-    float targetPct = rawFileSize > 0
-        ? ((float)rawFile.position() * 100.0f / (float)rawFileSize)
-        : 100.0f;
-    if (targetPct < 1.0f) targetPct = 1.0f;
-    setRawPlaybackTarget(targetPct);
-    if (sendRawBlock(block)) {
-      sentBlocks++;
-    }
-  }
-  rawFile.close();
-
-  if (!rawPlaybackStopRequestedFlag && foundRawBlock) {
-    setRawPlaybackTarget(100.0f);
-    finishRawPlaybackAnimation(180);
-  }
-
-  stopRawPlaybackAnimationTask();
-  armRawPlaybackReleaseGuards();
-  deinitRfModule();
+  // The full, validated file goes to the bounded RMT laboratory path. Never
+  // truncate a RAW line or force a different frequency, preset or modulation.
+  suspendLegacyReceive();
+  runRadioLabFile(fileName.c_str());
   restoreReceiveMode();
+  armRawPlaybackReleaseGuards();
+  return false; // The laboratory UI owns/announces its actual TX result.
+}
 
-  return sentBlocks > 0;
+static bool prepareLegacyDecodedTx(const research::LegacyDecodedPlan& plan) {
+  if (!ensureCC1101Initialized()) return false;
+  suspendLegacyReceive();
+  ELECHOUSE_cc1101.SpiStrobe(CC1101_SIDLE);
+  if (!waitCC1101State(1)) return false;
+  // Start sparse official presets from silicon reset defaults, not from a prior
+  // application or the SmartRC library's unrelated register defaults.
+  ELECHOUSE_cc1101.SpiStrobe(CC1101_SRES);
+  delay(2);
+  if (!waitCC1101State(1)) return false;
+  uint8_t pa[8] = {};
+  ELECHOUSE_cc1101.SpiWriteBurstReg(CC1101_PATABLE, pa, 8);
+  for (size_t i = 0; i < research::kRegisterCount; ++i) {
+    if (!plan.radio.present[i]) continue;
+    ELECHOUSE_cc1101.SpiWriteReg(i, plan.radio.value[i]);
+    if (ELECHOUSE_cc1101.SpiReadReg(i) != plan.radio.value[i]) return false;
+  }
+  const uint32_t word = static_cast<uint32_t>((uint64_t(plan.frequencyHz) * 65536U +
+                                              research::kCrystalHz / 2U) / research::kCrystalHz);
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_FREQ2, word >> 16);
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_FREQ1, word >> 8);
+  ELECHOUSE_cc1101.SpiWriteReg(CC1101_FREQ0, word);
+  // The legacy path stays at the lowest shared nominal power (-10 dBm).
+  // Imported PA tables never override the laboratory policy.
+  pa[1] = chat_radio_pa(plan.frequencyHz, 0);
+  ELECHOUSE_cc1101.SpiWriteBurstReg(CC1101_PATABLE, pa, 8);
+  ELECHOUSE_cc1101.SpiStrobe(CC1101_SCAL);
+  if (!waitCC1101State(1)) return false;
+  digitalWrite(cc1101GDO0Pin, LOW);
+  pinMode(cc1101GDO0Pin, OUTPUT);
+  ELECHOUSE_cc1101.SetTx();
+  return waitCC1101State(0x13);
 }
 
 
 void sendSynthKey(tpKeyData* kd) {
-  Serial.println(F("Starting transmission"));
-  String protocol = getTypeName(kd->type);
-  if (protocol != "RAW") {
-    OLED_printKey(kd, subExplorer.selectedFile, true);
+  if (subExplorer.selectedFile.length() == 0) {
+    OLED_printError(F("Select validated file"), true); delay(1000); return;
   }
-
-  Serial.print(F("Transmitting key, protocol: "));
-  Serial.print(getTypeName(kd->type));
-  Serial.print(F(", ID: "));
-  for (byte i = 0; i < 8; i++) {
-    if (kd->keyID[i] < 0x10) Serial.print("0");
-    Serial.print(kd->keyID[i], HEX);
-    if (i < 7) Serial.print(" ");
+  const String path = subExplorer.currentDir + "/" + subExplorer.selectedFile;
+  research::SubInfo info;
+  if (!inspectLegacySubFile(path, info)) {
+    OLED_printError(legacyFileLoadError, true); delay(1000); return;
   }
-  Serial.print(F(", Freq: "));
-  Serial.print(kd->frequency);
-  Serial.println(F(" MHz"));
-
-  String data = String(kd->rawData);
-  uint64_t key = 0;
-  for (int i = 0; i < 8; i++) {
-    key |= ((uint64_t)kd->keyID[i] << ((7 - i) * 8));
-  }
-  byte modulation = 2;
-  float rxBW = 270.0;
-  float deviation = 0;
-  float dataRate = 10;
-
-  int rcswitch_protocol_no = 1;
-
-  if (protocol == "RAW" && subExplorer.selectedFile.length() > 0) {
-    frequency = kd->frequency;
-    String rawPath = subExplorer.currentDir + "/" + subExplorer.selectedFile;
-    playRawRecorderFile(rawPath);
+  if (info.kind == research::SubKind::Raw) {
+    playRawRecorderFile(path);
     OLED_printKey(kd, subExplorer.selectedFile);
     return;
   }
-
-  if (!initRfModule("tx", kd->frequency)) {
-    Serial.println(F("Failed to initialize CC1101"));
-    OLED_printCC1101InitError();
-    waitBackFromCC1101InitError();
-    OLED_printKey(kd, subExplorer.selectedFile);
-    return;
+  research::LegacyDecodedPlan plan;
+  const char* reason = nullptr;
+  if (!research::legacyDecodedPlan(info, plan, &reason)) {
+    Serial.printf("[SUB] transmission blocked: %s\n", reason ? reason : "invalid file");
+    OLED_printError(F("Unsupported: serial"), true); delay(1200); return;
   }
-
-  if (bruceConfig.rfModule == CC1101_SPI_MODULE) {
-    ELECHOUSE_cc1101.setModulation(modulation);
-    ELECHOUSE_cc1101.setRxBW(rxBW);
-    ELECHOUSE_cc1101.setDeviation(deviation);
-    ELECHOUSE_cc1101.setDRate(dataRate);
-    pinMode(bruceConfigPins.CC1101_bus.io0, OUTPUT);
-    ELECHOUSE_cc1101.setPA(12);
-    ELECHOUSE_cc1101.SetTx();
+  if (!radioLabPermitTx(plan.frequencyHz, plan.durationBoundMs)) {
+    OLED_printError(F("TX profile/limit off"), true);
+    Serial.println(F("[SUB] enable an appropriate shielded laboratory profile in Radio Settings; no TX occurred"));
+    delay(1200); return;
+  }
+  OLED_printKey(kd, subExplorer.selectedFile, true);
+  if (prepareLegacyDecodedTx(plan)) {
+    Serial.printf("[SUB] exact %s freq=%lu protocol=%u bits=%u repeats=%u bound=%lu ms nominal=-10dBm\n",
+      info.preset, static_cast<unsigned long>(plan.frequencyHz), plan.protocol, plan.bits, plan.repeats,
+      static_cast<unsigned long>(plan.durationBoundMs));
+    RCSwitch_send(plan.key, plan.bits, plan.pulseUs, plan.protocol, plan.repeats);
   } else {
-    if (modulation != 2) {
-      Serial.print("unsupported modulation: ");
-      Serial.println(modulation);
-      OLED_printError(F("Unsupported modulation"), true);
-      delay(1000);
-      OLED_printKey(kd, subExplorer.selectedFile);
-      deinitRfModule();
-      return;
-    }
-    initRfModule("tx", kd->frequency);
+    Serial.println(F("[SUB] TX configuration/readback/state error"));
+    OLED_printError(F("TX radio error"), true); delay(900);
   }
-
-  bool transmissionSuccess = false;
-
-  if (protocol == "RAW") {
-    int sentBlocks = 0;
-    int totalBlocks = 0;
-
-    int countStart = 0;
-    while (countStart < data.length()) {
-      int countEnd = data.indexOf('\n', countStart);
-      if (countEnd < 0) countEnd = data.length();
-      String block = data.substring(countStart, countEnd);
-      block.trim();
-      if (block.length() > 0) totalBlocks++;
-      countStart = countEnd + 1;
-    }
-
-    rawPlaybackActive = true;
-    rawPlaybackStopRequestedFlag = false;
-    rawPlaybackOkWasPressed = false;
-    rawPlaybackBackWasPressed = false;
-    rawPlaybackBackPressedAt = 0;
-    rawPlaybackIgnoreOkRelease = digitalRead(BUTTON_OK) == LOW;
-    rawPlaybackIgnoreBackRelease = digitalRead(BUTTON_BACK) == LOW;
-    rawPlaybackShownPct = 0.0f;
-    rawPlaybackTargetPct = 0.0f;
-    rawPlaybackStartMs = millis();
-    rawPlaybackLastDrawMs = 0;
-    drawRawPlaybackWave(0, 0);
-    startRawPlaybackAnimationTask();
-
-    bool sentFromFile = false;
-    if (subExplorer.selectedFile.length() > 0) {
-      File rawFile = SD.open(subExplorer.currentDir + "/" + subExplorer.selectedFile, FILE_READ);
-      if (rawFile) {
-        while (rawFile.available()) {
-          String line = rawFile.readStringUntil('\n');
-          line.trim();
-          if (!line.startsWith("RAW_Data:")) continue;
-          String block = line.substring(9);
-          block.trim();
-          if (sendRawBlock(block)) {
-            sentBlocks++;
-            sentFromFile = true;
-          }
-        }
-        rawFile.close();
-      }
-    }
-
-    if (!sentFromFile) {
-      int lineStart = 0;
-      while (lineStart < data.length()) {
-        int lineEnd = data.indexOf('\n', lineStart);
-        if (lineEnd < 0) lineEnd = data.length();
-        String block = data.substring(lineStart, lineEnd);
-        lineStart = lineEnd + 1;
-        block.trim();
-        if (block.length() == 0) continue;
-        float targetPct = (totalBlocks > 0) ? ((float)(sentBlocks + 1) * 100.0f / (float)totalBlocks) : 100.0f;
-        setRawPlaybackTarget(targetPct);
-        if (sendRawBlock(block)) {
-          sentBlocks++;
-        }
-      }
-    }
-
-    if (!rawPlaybackStopRequestedFlag) {
-      finishRawPlaybackAnimation(180);
-    }
-    stopRawPlaybackAnimationTask();
-    armRawPlaybackReleaseGuards();
-
-    transmissionSuccess = (sentBlocks > 0);
-  } else if (protocol == "RcSwitch") {
-    data.replace(" ", "");
-    uint64_t data_val = key;
-    int bits = kd->bitLength;
-    int pulse = kd->te;
-    int repeat = 10;
-    display.setCursor(67, 54);
-    display.print("Sending...");
-    display.display();
-    RCSwitch_send(data_val, bits, pulse, rcswitch_protocol_no, repeat);
-    transmissionSuccess = true;
-  } else if (protocol == "Princeton") {
-    RCSwitch_send(key, kd->bitLength, 350, 1, 10);
-    transmissionSuccess = true;
-  } else {
-    Serial.print("Unsupported protocol: ");
-    Serial.println(protocol);
-    RCSwitch_send(key, kd->bitLength, 270, 11, 10);
-    transmissionSuccess = true;
-  }
-
   deinitRfModule();
-
+  restoreReceiveMode();
   OLED_printKey(kd, subExplorer.selectedFile);
 }
 
