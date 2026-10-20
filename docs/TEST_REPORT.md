@@ -7,8 +7,8 @@ Release 1 artifact/device evidence is explicitly historical. The Russian
 `c5779ee` source state passed CI and eleven-app ESP32 diagnostics, while chat
 still failed both physical directions. A verified later `e23c31d` image received
 controlled Flipper packets with valid CRC at an adjusted programmed receive
-frequency. All three CI jobs passed at `28e4d46`. The subsequent `d63f1ca`
-carrier-gate change awaits its own CI and final physical two-way sign-off;
+frequency. All three CI jobs passed at `28e4d46` and the subsequent `d63f1ca`
+carrier-gate change. Final physical two-way sign-off remains pending;
 earlier results are not generalized to that image.
 
 ## Build results
@@ -22,7 +22,7 @@ earlier results are not generalized to that image.
 | Russian release 2 source `c5779ee`: Pocket/settings, static Send, simple chat and eleven apps | PASS build/CI; device app checks recorded below | Linux SH1106 CI linked and uploaded its firmware; all eleven Russian SD apps passed 120 diagnostic frames each on the ESP32 build. Physical chat still failed both directions. The release owner's image manifest identifies the separately built device binary |
 | Intermediate image `e23c31d` | Verified flashed; controlled one-way RX PASS | Valid-CRC Flipper-to-ESP32 packets at adjusted programmed RX frequency; final calibrated two-way exchange was not established by this test |
 | Source `28e4d46`: complete-path pagination, reference-clock probe, UART diagnostics and device calibration | PASS native / ESP32 / Flipper CI | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,605 flash bytes (86.3%); both target artifacts uploaded. Final device evidence is recorded separately |
-| Later source `d63f1ca`: host carrier-gate correction | Native profile/helper tests PASS; final CI/device sign-off pending | Host gate uses cached RSSI/sync state and the selected threshold; shared MCSM1 wire profile is unchanged. This row does not claim peer reception |
+| Later source `d63f1ca`: host carrier-gate correction | PASS native / ESP32 / Flipper CI; final device sign-off pending | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,629 flash bytes (86.3%); both target artifacts uploaded. Host gate uses cached RSSI/sync state and selected threshold; shared MCSM1 wire profile is unchanged. This row does not claim peer reception |
 | Companion Flipper chat FAP (previous checked source) | PASS | uFBT 0.2.6, official firmware/SDK 1.5.1, target 7 / API 88.2; actual `.fap` produced and strict import check passed |
 
 The official Flipper source reference is
@@ -146,9 +146,13 @@ The [later three-job CI run](https://github.com/Gegcbr2022/ESP-HACK/actions/runs
 passed **native, ESP32 SH1106 and Flipper** at exact source
 `28e4d46356ce7713ec4af1c4c24c5e8dcfdb82f2`. It includes the updated static
 encoder, complete-path browser, UART lifecycle and calibration suites. Both
-ESP32 and Flipper artifacts uploaded successfully. The subsequent `d63f1ca`
-carrier-gate change requires its own result; the 1,048,643-check local profile
-suite is not attributed to the earlier run.
+ESP32 and Flipper artifacts uploaded successfully.
+
+The [carrier-gate CI run](https://github.com/Gegcbr2022/ESP-HACK/actions/runs/39484162549)
+also passed **native, ESP32 SH1106 and Flipper** at exact source
+`d63f1ca96d7af20b336cee8065ea862468adc343`. The native job includes the
+1,048,643-check profile/carrier-gate suite. Both target artifacts uploaded
+successfully. This is a build/software-test result, not a peer-reception test.
 The supplied firmware's manifest/SHA256 identifies its own Windows build;
 GitHub Actions builds independently on Linux.
 

@@ -108,8 +108,8 @@ The `c5779ee` CI run passed all three jobs, and all eleven Russian SD apps
 passed 120 diagnostic frames each on ESP32 with radio starts disabled.
 The `e23c31d` diagnostic candidate was verified flashed and yielded the one-way
 RF evidence. All three CI jobs also passed at `28e4d46`, including full-path
-browsing and device calibration. The later `d63f1ca` carrier-gate correction
-awaits final CI and bidirectional device checks.
+browsing and device calibration. All three CI jobs passed again at `d63f1ca`,
+including the carrier-gate correction. Final bidirectional device checks remain pending.
 Exact source states and limits are in the [test report](docs/TEST_REPORT.md).
 
 Unrelated upstream applications remain available; their hardware behavior is

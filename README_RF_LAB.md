@@ -121,8 +121,8 @@ All eleven Russian SD apps passed 120 diagnostic input/tick/draw frames each on
 the `c5779ee` ESP32 build with radio starts disabled. Its three-job CI run also
 passed. The `e23c31d` diagnostic candidate was verified flashed and yielded the
 one-way RF result. All three CI jobs passed at `28e4d46`, including full-path
-browsing and per-device calibration. The later `d63f1ca` carrier-gate change
-awaits final CI and bidirectional device results. Earlier
+browsing and per-device calibration. All three jobs also passed at `d63f1ca`,
+including its carrier-gate change; final bidirectional device results remain pending. Earlier
 release 1 evidence and exact source states are separated in the test report.
 
 ## Build, test, flash and rollback

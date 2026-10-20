@@ -57,8 +57,9 @@
 - All three CI jobs passed at `c5779ee`. The verified-flashed `e23c31d`
   diagnostic candidate received valid-CRC Flipper packets at an adjusted
   programmed RX frequency. All three CI jobs also passed at `28e4d46`, including
-  full-path browsing and device calibration. The later `d63f1ca` host carrier
-  gate uses cached RSSI/sync state; final CI and two-way device results remain pending.
+  full-path browsing and device calibration. All three jobs also passed at
+  `d63f1ca`; its host carrier gate uses cached RSSI/sync state. Final two-way
+  device results remain pending.
 
 See [Pocket UI](docs/POCKET_UI.md), [SD games](docs/SD_GAMES.md),
 [SD utilities](docs/SD_UTILITIES.md) and [test results](docs/TEST_REPORT.md).

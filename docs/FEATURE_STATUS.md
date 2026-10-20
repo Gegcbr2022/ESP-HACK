@@ -12,8 +12,8 @@ that physical chat still failed in both directions on that build. A later
 verified `e23c31d` image received controlled Flipper-to-ESP32 packets with valid
 CRC at an adjusted programmed receive frequency. This is one-way evidence,
 not a completed calibrated two-way test. All three CI jobs passed at
-`28e4d46`. The later `d63f1ca` host carrier-gate correction awaits its own CI
-and final bidirectional device record.
+`28e4d46` and `d63f1ca`, including the latter's host carrier-gate correction.
+The final bidirectional device record remains pending.
 
 | Area | Implemented / compiled | Native validation | Physical status |
 |---|---|---|---|
