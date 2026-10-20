@@ -2,9 +2,7 @@
 #define LIST_MENU_H
 
 #include "display.h"
-
-// Existing WiFi..Settings indices remain 0..6; SD Apps is appended at index 7.
-static constexpr byte MAIN_MENU_ITEM_COUNT = 8;
+#include "menu_model.h"
 
 struct MenuIcon {
   uint8_t width;

@@ -8,6 +8,7 @@
 #include "CONFIG.h"
 #include "misc.h"
 #include "interface/interface.h"
+#include "interface/menu/appearance_config.h"
 #include "subghz.h"
 #include "research/lab_suite.h"
 #include "research/lua_apps.h"
@@ -67,7 +68,7 @@ byte gamesMenuIndex = 0;
 
 byte settingsMenuIndex = 0;
 byte colorSelectionIndex = 1;
-byte menu = 1;
+byte menu = MENU_STYLE_POCKET;
 byte submenu = 1;
 
 extern const unsigned long standbyTimeoutOptionsMs[] = {0UL, 15000UL, 30000UL, 60000UL, 180000UL, 300000UL, 600000UL, 1800000UL};
@@ -297,7 +298,7 @@ bool ensureSDReadyInteractive(bool allowSkip) {
 }
 
 void applyFactoryDefaults() {
-  menu = 1;
+  menu = MENU_STYLE_POCKET;
   submenu = 1;
   colorSelectionIndex = 1;
   standbyTimeoutIndex = 2;
@@ -309,20 +310,11 @@ void applyFactoryDefaults() {
   applyColorScheme();
 }
 
-struct AppearanceStorage {
-  uint32_t signature;
-  byte menu;
-  byte submenu;
-  byte color;
-  byte standby;
-};
-
 struct BootLogoStorage {
   uint32_t signature;
   char path[ESPHACK_BOOT_LOGO_PATH_SIZE];
 };
 
-static const uint32_t APPEARANCE_STORAGE_SIGNATURE = 0x45535041UL;
 static const uint32_t BOOT_LOGO_STORAGE_SIGNATURE = 0x424C4F47UL;
 static bool appearanceStorageReady = false;
 
@@ -336,8 +328,8 @@ static bool ensureAppearanceStorageReady() {
   return appearanceStorageReady;
 }
 
-static void saveAppearanceConfig() {
-  if (!ensureAppearanceStorageReady()) return;
+static bool saveAppearanceConfig() {
+  if (!ensureAppearanceStorageReady()) return false;
   AppearanceStorage stored = {
     APPEARANCE_STORAGE_SIGNATURE,
     menu,
@@ -346,23 +338,21 @@ static void saveAppearanceConfig() {
     standbyTimeoutIndex
   };
   EEPROM.put(ESPHACK_APPEARANCE_EEPROM_ADDRESS, stored);
-  EEPROM.commit();
+  return EEPROM.commit();
 }
 
 static bool loadAppearanceConfig() {
   if (!ensureAppearanceStorageReady()) return false;
   AppearanceStorage stored;
   EEPROM.get(ESPHACK_APPEARANCE_EEPROM_ADDRESS, stored);
-  if (stored.signature != APPEARANCE_STORAGE_SIGNATURE ||
-      stored.menu > 3 || stored.submenu > 1 ||
-      stored.color > 1 || stored.standby >= STANDBY_OPTION_COUNT) {
-    return false;
-  }
+  const bool migrating = stored.signature == LEGACY_APPEARANCE_SIGNATURE;
+  if (!normalizeAppearance(stored, STANDBY_OPTION_COUNT)) return false;
   menu = stored.menu;
   submenu = stored.submenu;
   colorSelectionIndex = stored.color;
   standbyTimeoutIndex = stored.standby;
   standbyTimeoutMs = standbyTimeoutOptionsMs[standbyTimeoutIndex];
+  if (migrating && !saveAppearanceConfig()) Serial.println("[UI] Appearance migration could not be saved");
   return true;
 }
 
@@ -464,13 +454,7 @@ void loadConfig() {
         String val = line.substring(5);
         val.trim();
         val.toLowerCase();
-        if (val == "wii") {
-          legacyMenu = 2;
-        } else if (val == "dsi") {
-          legacyMenu = 3;
-        } else {
-          legacyMenu = (val == "flipper" || val == "list") ? 1 : 0;
-        }
+        legacyMenu = menuStyleFromConfig(val.c_str());
       } else if (line.startsWith("submenu=")) {
         String val = line.substring(8);
         val.trim();
@@ -496,11 +480,13 @@ void loadConfig() {
   }
 
   if (!appearanceLoaded) {
-    standbyTimeoutIndex = legacyStandby;
+    const AppearanceStorage migrated = migrateLegacySDStyle(legacyMenu, legacySubmenu, legacyColor, legacyStandby);
+    standbyTimeoutIndex = migrated.standby;
     standbyTimeoutMs = standbyTimeoutOptionsMs[standbyTimeoutIndex];
-    colorSelectionIndex = legacyColor;
-    menu = legacyMenu;
-    submenu = legacySubmenu;
+    colorSelectionIndex = migrated.color;
+    menu = migrated.menu;
+    submenu = migrated.submenu;
+    if (!saveAppearanceConfig()) Serial.println("[UI] Appearance defaults could not be saved");
   }
   applyColorScheme();
 
@@ -732,12 +718,12 @@ void loop() {
 
     if (upPress) {
       byte previousIndex = currentMenu;
-      currentMenu = (currentMenu - 1 + MENU_ITEM_COUNT) % MENU_ITEM_COUNT;
+      currentMenu = mainMenuStep(currentMenu, -1);
       OLED_printMenuAnimated(display, currentMenu, previousIndex);
     }
     if (downPress) {
       byte previousIndex = currentMenu;
-      currentMenu = (currentMenu + 1) % MENU_ITEM_COUNT;
+      currentMenu = mainMenuStep(currentMenu, 1);
       OLED_printMenuAnimated(display, currentMenu, previousIndex);
     }
     if (okClick) {

@@ -7,6 +7,7 @@
 #include "menu/pages_menu.h"
 #include "menu/wii_menu.h"
 #include "menu/dsi_menu.h"
+#include "menu/pocket_menu.h"
 #include "submenu/submenu.h"
 
 #define MENU_ITEM_COUNT MAIN_MENU_ITEM_COUNT
@@ -214,6 +215,10 @@ inline void OLED_printLogo(DisplayType &display, bool show = true) {
 }
 
 inline void OLED_printMenu(DisplayType &display, byte menuIndex) {
+  if (menu == MENU_STYLE_POCKET) {
+    displayPocketMenu(display, menuIndex);
+    return;
+  }
   if (menu == 1) {
     displayListMenu(display, menuIndex);
     return;
@@ -230,6 +235,10 @@ inline void OLED_printMenu(DisplayType &display, byte menuIndex) {
 }
 
 inline void OLED_printMenuAnimated(DisplayType &display, byte menuIndex, int previousIndex = -1) {
+  if (menu == MENU_STYLE_POCKET) {
+    displayPocketMenu(display, menuIndex);
+    return;
+  }
   if (menu == 1) {
     displayListMenu(display, menuIndex, previousIndex);
     return;

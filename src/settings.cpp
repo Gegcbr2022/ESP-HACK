@@ -50,8 +50,10 @@ static const char* interfaceItems[] = {"Menu", "Submenu", "Color", "Standby", "B
 static const char* interfaceListItems[] = {"Menu", "Submenu", "Color", "Standby", "Boot Logo"};
 static const byte INTERFACE_ITEM_COUNT = sizeof(interfaceItems) / sizeof(interfaceItems[0]);
 static const SubmenuItems interfaceSubmenuItems = {interfaceItems, interfaceListItems, INTERFACE_ITEM_COUNT};
-static const byte MENU_STYLE_ITEM_COUNT = 4;
-static const char* menuStyleItems[] = {"Pages", "List", "Wii", "DSi"};
+static const byte MENU_STYLE_ITEM_COUNT = MAIN_MENU_STYLE_COUNT;
+static const char* menuStyleItems[] = {"Pages", "List", "Wii", "DSi", "Pocket"};
+static_assert(sizeof(menuStyleItems) / sizeof(menuStyleItems[0]) == MAIN_MENU_STYLE_COUNT,
+              "Every menu style must remain selectable");
 static const SubmenuItems menuStyleSubmenuItems = {
   menuStyleItems, menuStyleItems, MENU_STYLE_ITEM_COUNT
 };
