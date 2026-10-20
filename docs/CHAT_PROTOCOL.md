@@ -125,6 +125,15 @@ carrier timeout, four failed attempts and wrong-session ACK rejection.
 It also performs100000 malformed-frame trials. Host simulation does not test
 RF, interrupt latency, crystal accuracy, CC1101 FIFO, antenna, range or regulation.
 
+Reproduce both C99 and C++11 host builds with a native GCC/Clang or Zig compiler:
+
+```text
+python tests/run_chat_tests.py --compiler /path/to/zig
+```
+
+The Flipper HAL/GDO/FIFO recovery path is compiled and documented as a pending
+hardware regression in the app README. It is not covered by the host engine mock.
+
 Pending physical procedure: match this exact profile on both devices, enable
 permitted lab TX, exchange discovery, send unique1/40/41/160-byte messages both
 directions and compare exact text and delivery count. Record frequency, nominal
