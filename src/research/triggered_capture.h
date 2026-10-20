@@ -15,13 +15,15 @@ public:
     static const uint32_t kStrongSpanUs = 1000;
     static const uint8_t kFreshEdgesToRearm = 4;
 
-    TriggeredCapture(int32_t* output, size_t capacity, int16_t threshold, uint32_t startedUs)
+    TriggeredCapture(int32_t* output, size_t capacity, int16_t threshold, uint32_t startedUs,
+                     uint32_t endQuietUs = kQuietUs)
         : output_(output), capacity_(capacity), used_(0), postTriggerPulses_(0), threshold_(threshold),
           phase_(output && capacity ? Phase::Armed : Phase::Corrupt), head_(0), queued_(0),
           pendingTotal_(0), pendingLost_(0), discardedTail_(0), rawDropped_(0),
           rawRejected_(0), badSamples_(0), lostSamples_(0), droppedBase_(0), rejectedBase_(0),
           discardedArmingDropped_(0), discardedArmingRejected_(0), discardedShort_(0),
-          rearms_(0), lastEdge_(startedUs), weakSince_(0), preQuietSince_(0), triggeredAt_(startedUs), freshEdges_(0),
+          rearms_(0), lastEdge_(startedUs), weakSince_(0), preQuietSince_(0), triggeredAt_(startedUs),
+          endQuietUs_(endQuietUs), freshEdges_(0),
           first_(true), previousPositive_(false), strong_(false), triggered_(false),
           preQuiet_(false), waitForWeak_(false), rssiQualified_(false) {}
 
@@ -99,13 +101,13 @@ public:
     void poll(uint32_t nowUs) {
         if(phase_ != Phase::Capturing) return;
         if(!strong_) {
-            if(uint32_t(nowUs - weakSince_) < kQuietUs) return;
+            if(uint32_t(nowUs - weakSince_) < endQuietUs_) return;
             if(!qualified()) { rearmShort(nowUs, true); return; }
             // RSSI stayed below threshold for the entire guard interval. This
             // explicitly excludes the deferred demodulator-noise tail, even if
             // its ring wrapped. Count all exclusions, rather than hide them.
             discardedTail_ += pendingTotal_; clearPending(); phase_ = Phase::Complete;
-        } else if(uint32_t(nowUs - lastEdge_) >= kQuietUs) {
+        } else if(uint32_t(nowUs - lastEdge_) >= endQuietUs_) {
             if(!qualified()) rearmShort(nowUs, false);
             else phase_ = Phase::Complete;
         }
@@ -206,6 +208,7 @@ private:
     uint32_t rawDropped_, rawRejected_, badSamples_, lostSamples_, droppedBase_, rejectedBase_;
     uint32_t discardedArmingDropped_, discardedArmingRejected_, discardedShort_, rearms_;
     uint32_t lastEdge_, weakSince_, preQuietSince_, triggeredAt_;
+    uint32_t endQuietUs_; // Session burst grouping only; armed recovery stays7ms.
     uint8_t freshEdges_;
     bool first_, previousPositive_, strong_, triggered_, preQuiet_, waitForWeak_, rssiQualified_;
 };

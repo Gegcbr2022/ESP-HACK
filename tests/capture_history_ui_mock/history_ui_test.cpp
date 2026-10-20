@@ -52,7 +52,7 @@ static void seed(){
         CHECK(loadPreset("FM476",slotImages[3])&&describeRadio(slotImages[3],928000000,slotSettings[3]));
     }
 }
-bool startMode(LabMode mode,bool automatic,bool multiple){CHECK(mode==LabMode::Raw&&automatic&&multiple);++starts;if(startFailures){--startFailures;return false;}active=true;if(seedEntries&&starts==1)seed();else history.clear();return true;}
+bool startMode(LabMode mode,bool automatic,bool multiple){CHECK(mode==LabMode::Raw&&automatic&&multiple);CHECK(settings.rxTimeoutMs==0);++starts;if(startFailures){--startFailures;return false;}active=true;if(seedEntries&&starts==1)seed();else history.clear();return true;}
 size_t labCopyCaptureHistory(size_t index,int32_t* out,size_t capacity,RegisterImage& image,RadioSettings& context){
     CHECK(!active);++copies;const auto* entry=history.entry(index);if(oversizedCopy)return capacity+1;if(copyFailure||!entry||capacity<entry->count)return 0;
     std::memcpy(out,history.pulses(index),entry->count*sizeof(int32_t));image=slotImages[index];context=slotSettings[index];return entry->count;
@@ -63,27 +63,28 @@ bool saveWave(const char*){CHECK(!active);++writes;savedFrequencies.push_back(se
 void playSavedCaptureHistory(){++plays;}
 HistoryUiSnapshot historyUiSnapshot(){HistoryUiSnapshot snapshot;snapshot.active=active;snapshot.thresholdReady=true;snapshot.count=history.size();snapshot.full=snapshot.count==4;for(size_t i=0;i<history.size();++i)snapshot.entries[i]=*history.entry(i);return snapshot;}
 static void reset(std::initializer_list<unsigned> buttons){history.clear();CHECK(history.bind(bank,8192));events=buttons;eventAt=starts=stops=copies=writes=stopFailures=startFailures=clears=plays=clearFailures=0;active=false;seedEntries=true;seedCount=2;copyFailure=writeFailure=uniqueFailure=oversizedCopy=false;serialCaptureContext=serialCaptureSavePending=serialCapturePlayPending=false;captureHistorySavedMask=0;headings.clear();serialOutput.clear();savedFrequencies.clear();CHECK(loadPreset("AM270",radio)&&describeRadio(radio,433920000,settings));}
+static void runApp(){const uint32_t prior=settings.rxTimeoutMs;captureHistoryApp();CHECK(settings.rxTimeoutMs==prior);}
 int main(){
-    reset({0,Down,Ok,Up,Ok,Back});captureHistoryApp();CHECK(writes==2&&copies==2);CHECK(savedFrequencies[0]==906400000&&savedFrequencies[1]==433920000);CHECK(settings.frequencyHz==433920000&&radio.value[0x10]==slotImages[0].value[0x10]);CHECK(history.size()==0&&!active&&clears==1);
-    reset({Ok,Back});seedEntries=false;captureHistoryApp();CHECK(!writes&&!copies&&stops==1);
-    reset({HoldOk,Back,HoldBack});captureHistoryApp();CHECK(starts==1&&history.size()==0&&clears==1);
-    reset({HoldOk,HoldOk,Back});captureHistoryApp();CHECK(starts==2&&history.size()==0);
-    reset({Down,Ok,HoldBack});copyFailure=true;captureHistoryApp();CHECK(!writes&&copies==1&&settings.frequencyHz==433920000&&!captureHistorySavedMask);
-    reset({Down,Ok,HoldBack});writeFailure=true;captureHistoryApp();CHECK(writes==1&&settings.frequencyHz==433920000&&radio.value[0x10]==slotImages[0].value[0x10]&&!captureHistorySavedMask);
-    reset({Down,Ok,HoldBack});uniqueFailure=true;captureHistoryApp();CHECK(!writes&&settings.frequencyHz==433920000&&!captureHistorySavedMask);
-    reset({HoldBack});captureHistoryApp();const unsigned before=stops;CHECK(!saveSelectedCaptureHistory(4)&&stops==before);
-    reset({Back,0,Ok,HoldBack});captureHistoryApp();CHECK(eventAt==4&&stops==1&&!writes&&headings[0]=="Не всё сохранено");
-    reset({Ok,Back,0,Ok,Down,Ok,Back});captureHistoryApp();CHECK(writes==2&&captureHistorySavedMask==3&&eventAt==7);
-    reset({Ok,HoldOk,HoldOk,Back});captureHistoryApp();CHECK(starts==2&&history.size()==0&&!captureHistorySavedMask);
-    reset({Down,Ok,HoldBack});stopFailures=1;captureHistoryApp();CHECK(!copies&&!writes&&!captureHistorySavedMask&&!active);
-    reset({Down,Ok,HoldBack});oversizedCopy=true;captureHistoryApp();CHECK(copies==1&&!writes&&!captureHistorySavedMask);
-    reset({SerialSave,HoldBack});captureHistoryApp();CHECK(writes==1&&captureHistorySavedMask==1&&serialOutput.size()==1);
+    reset({0,Down,Ok,Up,Ok,Back});runApp();CHECK(writes==2&&copies==2);CHECK(savedFrequencies[0]==906400000&&savedFrequencies[1]==433920000);CHECK(settings.frequencyHz==433920000&&radio.value[0x10]==slotImages[0].value[0x10]);CHECK(history.size()==0&&!active&&clears==1);
+    reset({Ok,Back});seedEntries=false;runApp();CHECK(!writes&&!copies&&stops==1);
+    reset({HoldOk,Back,HoldBack});runApp();CHECK(starts==1&&history.size()==0&&clears==1);
+    reset({HoldOk,HoldOk,Back});runApp();CHECK(starts==2&&history.size()==0);
+    reset({Down,Ok,HoldBack});copyFailure=true;runApp();CHECK(!writes&&copies==1&&settings.frequencyHz==433920000&&!captureHistorySavedMask);
+    reset({Down,Ok,HoldBack});writeFailure=true;runApp();CHECK(writes==1&&settings.frequencyHz==433920000&&radio.value[0x10]==slotImages[0].value[0x10]&&!captureHistorySavedMask);
+    reset({Down,Ok,HoldBack});uniqueFailure=true;runApp();CHECK(!writes&&settings.frequencyHz==433920000&&!captureHistorySavedMask);
+    reset({HoldBack});runApp();const unsigned before=stops;CHECK(!saveSelectedCaptureHistory(4)&&stops==before);
+    reset({Back,0,Ok,HoldBack});runApp();CHECK(eventAt==4&&stops==1&&!writes&&headings[0]=="Не всё сохранено");
+    reset({Ok,Back,0,Ok,Down,Ok,Back});runApp();CHECK(writes==2&&captureHistorySavedMask==3&&eventAt==7);
+    reset({Ok,HoldOk,HoldOk,Back});runApp();CHECK(starts==2&&history.size()==0&&!captureHistorySavedMask);
+    reset({Down,Ok,HoldBack});stopFailures=1;runApp();CHECK(!copies&&!writes&&!captureHistorySavedMask&&!active);
+    reset({Down,Ok,HoldBack});oversizedCopy=true;runApp();CHECK(copies==1&&!writes&&!captureHistorySavedMask);
+    reset({SerialSave,HoldBack});runApp();CHECK(writes==1&&captureHistorySavedMask==1&&serialOutput.size()==1);
     CHECK(serialOutput[0].find("SAVED")!=std::string::npos&&serialOutput[0].find("slot=1")!=std::string::npos);
-    reset({0,Up,Ok,HoldBack});seedCount=4;captureHistoryApp();CHECK(history.size()==0&&writes==1&&savedFrequencies[0]==928000000&&captureHistorySavedMask==8&&headings[0]=="Приём: 4/4");
-    reset({0,Down,Ok,HoldBack});seed();captureHistoryApp();CHECK(!starts&&writes==1&&savedFrequencies[0]==906400000&&captureHistorySavedPathSlot==1);
-    reset({0,HoldBack});serialCapturePlayPending=true;captureHistoryApp();CHECK(plays==1&&!writes&&!serialCapturePlayPending);
-    reset({HoldOk,HoldOk,HoldBack});clearFailures=1;captureHistoryApp();CHECK(starts==1&&clears==2&&!active&&history.size()==0);
-    reset({});startFailures=1;captureHistoryApp();CHECK(!active&&!writes&&!stops&&starts==1);
-    reset({});settings.packetFormat=PacketFormat::Fifo;captureHistoryApp();CHECK(!starts&&!writes&&!stops);
+    reset({0,Up,Ok,HoldBack});seedCount=4;runApp();CHECK(history.size()==0&&writes==1&&savedFrequencies[0]==928000000&&captureHistorySavedMask==8&&headings[0]=="Приём: 4/4");
+    reset({0,Down,Ok,HoldBack});seed();runApp();CHECK(!starts&&writes==1&&savedFrequencies[0]==906400000&&captureHistorySavedPathSlot==1);
+    reset({0,HoldBack});serialCapturePlayPending=true;runApp();CHECK(plays==1&&!writes&&!serialCapturePlayPending);
+    reset({HoldOk,HoldOk,HoldBack});clearFailures=1;runApp();CHECK(starts==1&&clears==2&&!active&&history.size()==0);
+    reset({});startFailures=1;runApp();CHECK(!active&&!writes&&!stops&&starts==1);
+    reset({});settings.packetFormat=PacketFormat::Fifo;runApp();CHECK(!starts&&!writes&&!stops);
     std::printf("capture history UI: %u checks passed (production UI include, real core model, selection/save/restart/unsaved guards, UTF8 display bounds)\n",checks);
 }

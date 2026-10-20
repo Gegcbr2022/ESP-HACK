@@ -358,11 +358,56 @@ static bool carrier_leadin_recovers(void) {
     CHECK(!sparse.triggered()&&!sparse.complete()&&sparse.rejected()==1);
     return true;
 }
+static bool history_groups_repeat_guard(void) {
+    int32_t out[256];uint32_t now=0xFFFFF000u;
+    TriggeredCapture grouped(out,256,-70,now,30000);
+    feed(grouped,now,-17);grouped.rssi(-30,now);
+    for(unsigned repeat=0;repeat<2;++repeat) {
+        for(unsigned bit=0;bit<24;++bit) {
+            const bool one=(0xA53A53u>>(23-bit))&1u;
+            feed(grouped,now,one?1170:390);feed(grouped,now,one?-390:-1170);
+            if((bit&1)==1)grouped.rssi(-30,now);
+        }
+        feed(grouped,now,390); // Ended sync HIGH; LOW guard ends at the next frame.
+        if(!repeat) {
+            grouped.rssi(-90,now);grouped.poll(now+7000);
+            CHECK(!grouped.complete()&&grouped.triggered()&&grouped.size()==49);
+            feed(grouped,now,-11700);grouped.rssi(-30,now);
+            CHECK(!grouped.complete()&&grouped.size()==50&&out[49]==-11700);
+        }
+    }
+    CHECK(grouped.size()==99&&grouped.postTriggerPulses()==99&&grouped.rssiQualified());
+    grouped.rssi(-90,now);grouped.poll(now+29999);CHECK(!grouped.complete());
+    grouped.poll(now+30000);CHECK(grouped.complete()&&grouped.rearmCount()==0);
+    for(unsigned repeat=0;repeat<2;++repeat) {
+        uint32_t decoded=0;const size_t start=repeat*50;
+        for(unsigned bit=0;bit<24;++bit) {
+            CHECK(out[start+2*bit]>0&&out[start+2*bit+1]<0);
+            decoded=(decoded<<1)|(out[start+2*bit]>-out[start+2*bit+1]);
+        }
+        CHECK(decoded==0xA53A53);
+    }
+    // The same grouping also applies to strong-carrier edge quiet. Advanced
+    // callers which omit the new argument retain the original7ms behavior.
+    int32_t originalOut[256];uint32_t originalNow=100;
+    TriggeredCapture original(originalOut,256,-90,originalNow);startBurst(original,originalNow);
+    now=100;TriggeredCapture strong(out,256,-90,now,30000);startBurst(strong,now);
+    original.poll(originalNow+7000);strong.poll(now+7000);
+    CHECK(original.complete()&&!strong.complete());
+    strong.poll(now+29999);CHECK(!strong.complete());strong.poll(now+30000);CHECK(strong.complete());
+    now=100;TriggeredCapture shortHistory(out,256,-90,now,30000);startBurst(shortHistory,now,6);
+    shortHistory.poll(now+7000);CHECK(shortHistory.triggered()&&shortHistory.rearmCount()==0);
+    shortHistory.poll(now+30000);CHECK(!shortHistory.triggered()&&shortHistory.rearmCount()==1);
+    TriggeredCapture armed(out,256,-90,0,30000);armed.integrity(0,1);
+    armed.rssi(-110,0);armed.rssi(-110,7000);
+    CHECK(armed.rejected()==0&&armed.discardedArmingRejected()==1); // still7ms, not30ms
+    return true;
+}
 int main() {
     if(!noise_inactive_and_pretrigger() || !minimum_gap_and_wrap() || !short_rssi_dip_and_tail() ||
        !deferred_overflow_and_stop() || !full_and_corruption() || !startup_gate() ||
        !clean_armed_recovery() || !short_candidate_rearms() || !post_gate_qualification() ||
-       !carrier_leadin_recovers()) return 1;
+       !carrier_leadin_recovers() || !history_groups_repeat_guard()) return 1;
     printf("triggered_capture: PASS (%u checks; startup median/deadline, post-gate/RSSI qualification, armed recovery, bounds, corruption)\n", checks);
     return 0;
 }
