@@ -15,7 +15,7 @@ static bool blockfall_game_test(const char* path) {
     std::string source; CHECK(read_file(path,source));
     alignas(16) uint8_t bank[LuaSandbox::kHeapBytes]; FakeClock clock={0,0}; MockSdk mock; current=&mock;
     LuaSandbox vm(bank,sizeof bank,clock_us,&clock); CHECK(vm.open(bindings));
-    CHECK(vm.load(source.data(),source.size(),path)); CHECK(utility_text(vm,mock,"Hold DOWN hard drop"));
+    CHECK(vm.load(source.data(),source.size(),path)); CHECK(utility_text(vm,mock,"Держите DN: сброс"));
     CHECK(utility_press(vm,"ok"));
     CHECK(extra_lua(vm,"g=app.state;assert(g.mode=='play' and #g.board==16 and g.lines==0);"
         "local seen={};for n=1,7 do assert(g.kind>=1 and g.kind<=7 and not seen[g.kind]);seen[g.kind]=true;"
@@ -41,7 +41,7 @@ static bool blockfall_game_test(const char* path) {
         "assert(g.lines==9999 and g.level==20 and g.score==9999999)"));
     CHECK(extra_lua(vm,"fixture(2,1,3,-2);g.board[1]=1023;app.input('down','press');"
         "assert(g.mode=='over' and g.board[1]==1023);for i=2,16 do assert(g.board[i]==0) end"));
-    CHECK(utility_text(vm,mock,"GAME OVER")); CHECK(utility_press(vm,"ok"));
+    CHECK(utility_text(vm,mock,"ПРОИГРЫШ")); CHECK(utility_press(vm,"ok"));
     CHECK(extra_lua(vm,"assert(g.mode=='play' and g.score==0 and g.lines==0);"
         "fixture(2,1,3,3);g.level=20;app.tick(-20);assert(g.elapsed==0 and g.y==3);"
         "app.tick(4294967295);assert(g.elapsed==100 and g.y==3);app.tick(100);assert(g.y==4 and g.elapsed==70)"));
@@ -55,7 +55,7 @@ static bool mines_game_test(const char* path) {
     std::string source; CHECK(read_file(path,source));
     alignas(16) uint8_t bank[LuaSandbox::kHeapBytes]; FakeClock clock={0,0}; MockSdk mock; current=&mock;
     LuaSandbox vm(bank,sizeof bank,clock_us,&clock); CHECK(vm.open(bindings));
-    CHECK(vm.load(source.data(),source.size(),path)); CHECK(utility_text(vm,mock,"First reveal is safe"));
+    CHECK(vm.load(source.data(),source.size(),path)); CHECK(utility_text(vm,mock,"Первый ход безопасен"));
     CHECK(utility_press(vm,"ok"));
     CHECK(extra_lua(vm,"g=app.state;assert(g.mode=='play' and not g.placed);"
         "app.input('up','press');assert(g.cursor==40);app.input('down','press');assert(g.cursor==1);"
@@ -82,11 +82,11 @@ static bool mines_game_test(const char* path) {
         "for i=1,40 do if g.mines[i] then g.cursor=i;break end end;"
         "app.input('back','press');app.input('ok','press');assert(g.mode~='over');"
         "app.input('back','press');app.input('ok','press');assert(g.mode=='over')"));
-    CHECK(utility_text(vm,mock,"BOOM"));
+    CHECK(utility_text(vm,mock,"МИНА!"));
     CHECK(extra_lua(vm,"app.input('ok','press');assert(not g.placed and g.revealed==0 and g.flagged==0);"
         "app.input('ok','press');for i=1,40 do if not g.mines[i] and not g.open[i] then "
         "g.cursor=i;app.input('ok','press') end end;assert(g.mode=='won' and g.revealed==33)"));
-    CHECK(utility_text(vm,mock,"YOU WIN")); CHECK(utility_press(vm,"ok"));
+    CHECK(utility_text(vm,mock,"ПОБЕДА")); CHECK(utility_press(vm,"ok"));
     CHECK(extra_lua(vm,"assert(g.mode=='play' and not g.placed and g.revealed==0);"
         "local c=g.cursor;app.input('down','hold');app.input('down','release');assert(g.cursor==c)"));
     CHECK(!mock.quit&&mock.starts==0&&mock.stops==0); CHECK(vm.peak()<=sizeof bank);

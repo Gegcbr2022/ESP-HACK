@@ -1,6 +1,6 @@
--- @name: Countdown
+-- @name: Таймер
 -- @category: Tools
--- @description: Visual session timer with pause, restart and 32-bit clock wrap.
+-- @description: Обратный отсчёт с паузой и повторным запуском.
 -- Visual session timer. UP/DOWN edit, OK next/start/pause, BACK edit. No radio.
 app = {}
 local minutes, seconds, field = 5, 0, 0
@@ -18,7 +18,7 @@ end
 
 local function start()
     remaining = (minutes * 60 + seconds) * 1000
-    if remaining == 0 then notice = "Set a nonzero time"; return end
+    if remaining == 0 then notice = "Задайте время > 0"; return end
     previous, mode, notice = clock.millis(), "run", ""
 end
 
@@ -46,20 +46,20 @@ end
 
 function app.draw()
     ui.clear()
-    ui.text(0, 0, "COUNTDOWN")
-    local label = mode == "set" and "SET" or mode == "run" and "RUN" or mode == "pause" and "PAUSE" or "DONE"
-    ui.text(128 - #label * 6, 0, label)
+    ui.text(0, 0, "ТАЙМЕР")
+    local label = mode == "set" and "ВВОД" or mode == "run" and "ИДЁТ" or mode == "pause" and "ПАУЗА" or "ГОТОВО"
+    ui.text(128 - (#label // 2) * 6, 0, label)
     local total = math.ceil(remaining / 1000)
     ui.text(34, 17, string.format("%02d:%02d", math.floor(total / 60), total % 60), 2)
     if mode == "set" then
         ui.line(field == 0 and 34 or 70, 34, field == 0 and 57 or 93, 34)
-        ui.text(0, 40, notice ~= "" and notice or field == 0 and "Edit minutes (0-99)" or "Edit seconds (0-59)")
-        ui.text(0, 56, "U/D set OK next/start")
+        ui.text(0, 40, notice ~= "" and notice or field == 0 and "Минуты: от 0 до 99" or "Секунды: от 0 до 59")
+        ui.text(0, 56, "UP/DN ввод OK далее")
     elseif mode == "done" then
-        ui.text(0, 40, "TIME UP! Visual alert")
-        ui.text(0, 56, "OK restart BACK edit")
+        ui.text(0, 40, "ВРЕМЯ ВЫШЛО!")
+        ui.text(0, 56, "OK заново BK ввод")
     else
-        ui.text(0, 40, mode == "run" and "Timing session" or "Timer paused")
-        ui.text(0, 56, mode == "run" and "OK pause BACK edit" or "OK resume BACK edit")
+        ui.text(0, 40, mode == "run" and "Идёт отсчёт" or "Отсчёт на паузе")
+        ui.text(0, 56, mode == "run" and "OK пауза BK ввод" or "OK дальше BK ввод")
     end
 end

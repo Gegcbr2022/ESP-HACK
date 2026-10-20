@@ -1,10 +1,10 @@
--- @name: Hello
+-- @name: Приветствие
 -- @category: Tools
--- @description: Greetings and a session counter
+-- @description: Приветствия и время текущего сеанса.
 -- Copy to /apps/hello.lua on the SD card. No radio operations.
 app = {}
 
-local greetings = {"HELLO!", "WELCOME", "MAKE IT."}
+local greetings = {"ПРИВЕТ!", "ДОБРОГО!", "ВПЕРЁД!"}
 local selected = 1
 local elapsed = 0
 
@@ -25,11 +25,11 @@ end
 
 function app.draw()
     ui.clear()
-    ui.text(0, 0, "HELLO / LUA")
+    ui.text(0, 0, "ПРИВЕТ / LUA")
     ui.text(103, 0, string.format("%d/3", selected))
     ui.line(0, 10, 127, 10)
     ui.rect(0, 15, 128, 28)
     ui.text(8, 21, greetings[selected], 2)
-    ui.text(0, 46, string.format("SD app / %ds", math.floor(elapsed / 1000)))
-    ui.text(0, 56, "OK next    BACK exit")
+    ui.text(0, 46, string.format("Сеанс: %d с", math.floor(elapsed / 1000)))
+    ui.text(0, 56, "OK далее  BK выход")
 end

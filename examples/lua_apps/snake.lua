@@ -1,6 +1,6 @@
--- @name: Snake
+-- @name: Змейка
 -- @category: Games
--- @description: Collect food, turn and grow
+-- @description: Собирайте еду, поворачивайте и растите.
 -- Snake: UP turns left, DOWN turns right, OK starts/pauses. No radio use.
 app = {}
 
@@ -80,17 +80,17 @@ end
 
 function app.draw()
     ui.clear()
-    ui.text(0, 0, "SNAKE " .. tostring(score))
+    ui.text(0, 0, "ЗМЕЙКА " .. tostring(score))
     if mode == "ready" then
-        ui.text(0, 16, "UP turns left")
-        ui.text(0, 28, "DOWN turns right")
-        ui.text(0, 40, "OK starts / pauses")
-        ui.text(0, 56, "BACK exits")
+        ui.text(0, 16, "UP поворот влево")
+        ui.text(0, 28, "DN поворот вправо")
+        ui.text(0, 40, "OK пуск / пауза")
+        ui.text(0, 56, "BK выход")
         return
     end
-    if mode == "pause" then ui.text(91, 0, "PAUSE")
-    elseif mode == "over" then ui.text(73, 0, "GAME OVER")
-    elseif mode == "won" then ui.text(79, 0, "YOU WIN!") end
+    if mode == "pause" then ui.text(91, 0, "ПАУЗА")
+    elseif mode == "over" then ui.text(73, 0, "ПРОИГРЫШ")
+    elseif mode == "won" then ui.text(79, 0, "ПОБЕДА!") end
     ui.rect(0, 11, 127, 42)
     for cell = 1, 200 do
         if cells[cell] ~= nil then
@@ -100,7 +100,7 @@ function app.draw()
     if mode ~= "won" then
         ui.rect(2 + (food - 1) % 25 * 5, 13 + math.floor((food - 1) / 25) * 5, 2, 2, true)
     end
-    if mode == "over" or mode == "won" then ui.text(0, 56, "OK retry   BACK exit")
-    elseif mode == "pause" then ui.text(0, 56, "OK resume  BACK exit")
-    else ui.text(0, 56, "UP< DOWN> OK pause") end
+    if mode == "over" or mode == "won" then ui.text(0, 56, "OK заново  BK выход")
+    elseif mode == "pause" then ui.text(0, 56, "OK дальше  BK выход")
+    else ui.text(0, 56, "UP< DN> OK пауза") end
 end

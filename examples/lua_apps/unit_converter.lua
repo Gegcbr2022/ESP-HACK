@@ -1,15 +1,15 @@
--- @name: Unit converter
+-- @name: Перевод единиц
 -- @category: Tools
--- @description: Twelve directions for length, speed, temperature, mass and more.
+-- @description: Длина, скорость, температура, масса, объём и давление.
 -- UP/DOWN edit input, OK next conversion, BACK step size. No hardware access.
 app = {}
 local pairs = {
-    {"m", "ft", 1 / 0.3048, 0},
-    {"km/h", "mph", 1 / 1.609344, 0},
+    {"м", "фут", 1 / 0.3048, 0},
+    {"км/ч", "миля/ч", 1 / 1.609344, 0},
     {"C", "F", 1.8, 32},
-    {"kg", "lb", 1 / 0.45359237, 0},
-    {"L", "USgal", 1 / 3.785411784, 0},
-    {"Pa", "psi", 1 / 6894.757293168, 0}
+    {"кг", "фунт", 1 / 0.45359237, 0},
+    {"л", "галСША", 1 / 3.785411784, 0},
+    {"Па", "psi", 1 / 6894.757293168, 0}
 }
 local steps = {1, 10, 100, 1000, 10000, 100000, 1000000, 10000000}
 local value, mode, step = 0, 1, 3
@@ -31,14 +31,14 @@ function app.draw()
     local input = value / 100
     local output = reverse and (input - pair[4]) / pair[3] or input * pair[3] + pair[4]
     if math.abs(output) < 0.005 then output = 0 end
-    ui.text(0, 0, "UNIT CONVERTER")
+    ui.text(0, 0, "ПЕРЕВОД ЕДИНИЦ")
     ui.text(0, 13, source .. " -> " .. target .. string.format(" (%d/12)", mode))
-    ui.text(0, 25, string.format("IN  %.2f %s", input, source))
+    ui.text(0, 25, string.format("Вх  %.2f %s", input, source))
     if kind == 3 and ((not reverse and value < -27315) or (reverse and value < -45967)) then
-        ui.text(0, 37, "Below absolute zero")
+        ui.text(0, 37, "Ниже абсолютного нуля")
     else
-        ui.text(0, 37, string.format("OUT %.2f %s", output, target))
+        ui.text(0, 37, string.format("Вых %.2f %s", output, target))
     end
-    ui.text(0, 47, string.format("Step: %.2f", steps[step] / 100))
-    ui.text(0, 56, "U/D edit OK> BK step")
+    ui.text(0, 47, string.format("Шаг: %.2f", steps[step] / 100))
+    ui.text(0, 56, "UP/DN ввод OK> BK шаг")
 end

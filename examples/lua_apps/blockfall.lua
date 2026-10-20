@@ -1,6 +1,6 @@
--- @name: Block Fall
+-- @name: Падающие блоки
 -- @category: Games
--- @description: Falling blocks, seven-bag pieces and line scoring.
+-- @description: Укладывайте фигуры и очищайте полные ряды.
 -- Blockfall: UP rotate, DOWN soft drop, hold DOWN hard drop, OK right, BACK left.
 -- Hold BACK exits through the native app host. No radio or saved data.
 app = {}
@@ -111,13 +111,13 @@ function app.tick(dt)
     if g.elapsed>=interval then g.elapsed=g.elapsed%interval;drop(false) end
 end
 function app.draw()
-    ui.clear();ui.text(0,0,"BLOCKFALL")
+    ui.clear();ui.text(0,0,"БЛОКИ")
     if g.mode=="help" then
-        ui.text(0,12,"UP rotate DOWN drop")
-        ui.text(0,24,"OK right BACK left")
-        ui.text(0,36,"Hold DOWN hard drop")
-        ui.text(0,48,"Hold BACK exits")
-        ui.text(0,56,"OK starts");return
+        ui.text(0,12,"UP поворот DN вниз")
+        ui.text(0,24,"OK вправо BK влево")
+        ui.text(0,36,"Держите DN: сброс")
+        ui.text(0,48,"Выход: держите BK")
+        ui.text(0,56,"OK начать");return
     end
     ui.rect(0,7,32,50)
     for row=0,15 do for col=0,9 do
@@ -131,12 +131,12 @@ function app.draw()
             end
         end end
     end
-    ui.text(38,9,"S:"..tostring(g.score));ui.text(38,18,"Lines:"..tostring(g.lines))
-    ui.text(38,27,"Level:"..tostring(g.level));ui.text(38,36,"NEXT")
+    ui.text(38,9,"С:"..tostring(g.score));ui.text(38,18,"Ряды:"..tostring(g.lines))
+    ui.text(38,27,"Ур.:"..tostring(g.level));ui.text(38,36,"СЛЕД.")
     local mask=pieces[g.next][1]
     for row=0,3 do for col=0,3 do
         if (mask&(1<<(row*4+col)))~=0 then ui.rect(72+col*3,36+row*3,2,2,true) end
     end end
-    ui.text(38,46,g.mode=="over" and "GAME OVER" or "Hold DN drops")
-    ui.text(0,56,g.mode=="over" and "OK retry Hold BK exit" or "UP^ DNv OK> BK<")
+    ui.text(38,46,g.mode=="over" and "ПРОИГРЫШ" or "DN: сброс")
+    ui.text(0,56,g.mode=="over" and "OK заново BK держать" or "UP^ DNv OK> BK<")
 end

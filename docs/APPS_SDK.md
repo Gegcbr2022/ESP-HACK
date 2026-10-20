@@ -24,8 +24,9 @@ Create `/apps` on the SD card and copy these source examples there:
 | `examples/lua_apps/unit_converter.lua` | Twelve conversion directions across six unit pairs | UP/DOWN edit, OK next direction, short BACK increment |
 | `examples/lua_apps/resistor_codes.lua` | Conventional four/five-band resistor code reader | UP/DOWN color, OK next band, short BACK four/five bands |
 
-Then open **SD Apps** from the main menu. Choose All apps, Tools, Games, Radio,
-Favorites or Recent, then select an app with OK. Hold OK on an app to view its
+Then open **Приложения SD** from the main menu. Choose **Все приложения** (all),
+**Инструменты** (tools), **Игры** (games), **Радио** (radio), **Избранное**
+(favorites) or **Недавние** (recent), then select an app with OK. Hold OK on an app to view its
 description/file information; OK there adds/removes a favorite. UP/DOWN switches
 information pages. The launcher retains up to eight favorites and four recent
 apps on SD, and displays at most 32 valid source files from `/apps`. These
@@ -51,7 +52,9 @@ Place optional metadata at the top of an app, before executable code:
 app = {}
 ```
 
-Names use at most 21 printable ASCII characters, descriptions at most 64.
+Names use at most 21 display glyphs, descriptions at most 64. Printable ASCII
+and Russian А–Я/а–я/Ё/ё in valid UTF-8 are supported; other Unicode and control
+characters are rejected. The shipped examples use Russian titles and help text.
 Categories are exactly `Tools`, `Games` or `Radio`; unknown values retain the
 default Tools category. Without a valid name the launcher uses the filename
 stem. It reads at most the first 1 KiB / 32 lines and stops metadata parsing at
@@ -120,8 +123,15 @@ application cleanup callback to implement.
 All drawing is white on the monochrome framebuffer. Coordinates are pixels;
 `(0,0)` is the top-left corner. Keep content within `0..127`, `0..63`. The default
 font uses approximately 6×8 pixels per character at scale 1, so a row holds
-about 21 ASCII characters. At scale 2 it holds about 10. Text starts at the
+about 21 ASCII or Russian glyphs. At scale 2 it holds about 10. Text starts at the
 requested cursor coordinate. Drawing does not itself refresh the display.
+`ui.text` accepts printable ASCII and Russian А–Я/а–я/Ё/ё as strict UTF-8;
+malformed sequences, unsupported Unicode and control characters are errors.
+The per-call limit is **160 bytes**, independently of the glyph count or screen
+width. Russian glyphs occupy two UTF-8 bytes each and the same six-pixel advance
+as ASCII at scale 1. Keep filenames and category identifiers ASCII as described
+above; display-language support does not change the chat protocol's ASCII wire
+text.
 
 | Call / value | Behavior |
 |---|---|

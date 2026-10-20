@@ -1,4 +1,5 @@
 #include "lua_sandbox.h"
+#include "../../src/interface/utf8_text.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -38,10 +39,11 @@ static int text(lua_State* state) {
     const int x=int(luaL_checkinteger(state,1)),y=int(luaL_checkinteger(state,2));
     size_t length; const char* value=luaL_checklstring(state,3,&length);
     const int scale=int(luaL_optinteger(state,4,1));
-    if(scale<1||scale>2||length>160||x<0||y<0||x+int(length)*6*scale>128||y+8*scale>64)
+    if(length>160) return luaL_error(state,"text exceeds 160 bytes");
+    size_t glyphs=0;
+    if(!ui_text::validate(value,length,&glyphs)) return luaL_error(state,"unsupported or malformed UTF-8");
+    if(scale<1||scale>2||x<0||y<0||x+int(glyphs)*6*scale>128||y+8*scale>64)
         return luaL_error(state,"sample text outside visible screen");
-    for(size_t i=0;i<length;++i) if(uint8_t(value[i])<32||uint8_t(value[i])>126)
-        return luaL_error(state,"text must be printable ASCII");
     current->lastText.assign(value,length);
     current->texts.push_back(TextDraw{x,y,current->lastText}); return 0;
 }
@@ -92,6 +94,7 @@ static int bindings(lua_State* state) {
 }
 static bool load(LuaSandbox& vm,const char* source) { return vm.load(source,strlen(source),"test"); }
 #include "wall_budget_test.inc"
+#include "utf8_display_test.inc"
 static bool allocator_tests() {
     alignas(16) uint8_t bank[4096]; LuaArena arena(bank,sizeof bank);
     void* a=arena.resize(nullptr,256); void* b=arena.resize(nullptr,512); void* c=arena.resize(nullptr,128);
@@ -188,12 +191,12 @@ static bool snake_game_test(const char* path) {
     alignas(16) uint8_t bank[LuaSandbox::kHeapBytes]; FakeClock clock={0,0}; MockSdk mock; current=&mock;
     LuaSandbox vm(bank,sizeof bank,clock_us,&clock); CHECK(vm.open(bindings));
     CHECK(vm.load(source.data(),source.size(),path)); CHECK(draw_frame(vm,mock));
-    CHECK(has_text(mock,"UP turns left")); CHECK(has_text(mock,"DOWN turns right"));
-    CHECK(vm.input("ok","release")); CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"OK starts"));
+    CHECK(has_text(mock,"UP поворот влево")); CHECK(has_text(mock,"DN поворот вправо"));
+    CHECK(vm.input("ok","release")); CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"OK пуск"));
     CHECK(vm.input("ok","press")); CHECK(draw_frame(vm,mock)); CHECK(snake_cells(mock)==3);
     CHECK(has_rect(mock,41,32,4,4));
     CHECK(vm.input("ok","press")); mock.millis+=500; CHECK(vm.tick(33));
-    CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"PAUSE")); CHECK(has_rect(mock,31,32,4,4));
+    CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"ПАУЗА")); CHECK(has_rect(mock,31,32,4,4));
     CHECK(vm.input("ok","press")); mock.millis+=179; CHECK(vm.tick(33));
     CHECK(draw_frame(vm,mock)); CHECK(!has_rect(mock,46,32,4,4));
     ++mock.millis; CHECK(vm.tick(33)); CHECK(draw_frame(vm,mock));
@@ -208,10 +211,10 @@ static bool snake_game_test(const char* path) {
     for(unsigned i=0;i<15;++i) { mock.millis+=180; CHECK(vm.tick(33)); }
     CHECK(vm.input("up","press"));
     for(unsigned i=0;i<4;++i) { mock.millis+=180; CHECK(vm.tick(33)); }
-    CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"SNAKE 1")); CHECK(snake_cells(mock)==4);
-    mock.millis+=180; CHECK(vm.tick(33)); CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"GAME OVER"));
+    CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"ЗМЕЙКА 1")); CHECK(snake_cells(mock)==4);
+    mock.millis+=180; CHECK(vm.tick(33)); CHECK(draw_frame(vm,mock)); CHECK(has_text(mock,"ПРОИГРЫШ"));
     CHECK(vm.input("ok","press")); CHECK(draw_frame(vm,mock));
-    CHECK(snake_cells(mock)==3); CHECK(has_text(mock,"SNAKE 0")); CHECK(!has_text(mock,"GAME OVER"));
+    CHECK(snake_cells(mock)==3); CHECK(has_text(mock,"ЗМЕЙКА 0")); CHECK(!has_text(mock,"ПРОИГРЫШ"));
 
     vm.close(); mock.millis=UINT32_MAX-100; CHECK(vm.open(bindings));
     CHECK(vm.load(source.data(),source.size(),path)); CHECK(vm.input("ok","press"));
@@ -225,9 +228,9 @@ static void read_2048(const MockSdk& mock,unsigned board[16],unsigned& score,uns
     memset(board,0,16*sizeof *board); score=moves=0;
     for(size_t i=0;i<mock.texts.size();++i) {
         const TextDraw& text=mock.texts[i];
-        const size_t s=text.value.find("S:");
-        if(s!=std::string::npos) score=unsigned(strtoul(text.value.c_str()+s+2,nullptr,10));
-        if(text.x==86&&text.y==0) moves=unsigned(strtoul(text.value.c_str()+2,nullptr,10));
+        const size_t s=text.value.find("С:");
+        if(s!=std::string::npos) score=unsigned(strtoul(text.value.c_str()+s+strlen("С:"),nullptr,10));
+        if(text.x==86&&text.y==0) moves=unsigned(strtoul(text.value.c_str()+strlen("Х:"),nullptr,10));
         if(text.y>=13&&text.y<=43&&(text.y-13)%10==0) {
             unsigned value=unsigned(strtoul(text.value.c_str(),nullptr,10));
             if(text.value.find('K')!=std::string::npos) value*=1024;
@@ -241,7 +244,7 @@ static bool game2048_test(const char* path) {
     alignas(16) uint8_t bank[LuaSandbox::kHeapBytes]; FakeClock clock={0,0}; MockSdk mock; current=&mock;
     LuaSandbox vm(bank,sizeof bank,clock_us,&clock); CHECK(vm.open(bindings));
     CHECK(vm.load(source.data(),source.size(),path)); CHECK(draw_frame(vm,mock));
-    CHECK(has_text(mock,"Hold BACK to exit")); CHECK(has_text(mock,"OK right   BACK left"));
+    CHECK(has_text(mock,"Выход: держите BK")); CHECK(has_text(mock,"OK вправо BK влево"));
     CHECK(vm.input("ok","press")); CHECK(draw_frame(vm,mock));
     unsigned before[16],scoreBefore,movesBefore; read_2048(mock,before,scoreBefore,movesBefore);
     unsigned initialTiles=0; for(unsigned i=0;i<16;++i) if(before[i]) ++initialTiles;
@@ -249,7 +252,7 @@ static bool game2048_test(const char* path) {
     unsigned merges=0,ends=0,successful=0,seed=1;
     const char* buttons[]={"up","down","ok","back"};
     for(unsigned turn=0;turn<1200;++turn) {
-        const bool over=has_text(mock,"GAME OVER");
+        const bool over=has_text(mock,"ПРОИГРЫШ");
         if(over) {
             ++ends; CHECK(vm.input("ok","press")); CHECK(draw_frame(vm,mock));
             read_2048(mock,before,scoreBefore,movesBefore); CHECK(scoreBefore==0&&movesBefore==0);
@@ -273,7 +276,7 @@ static bool game2048_test(const char* path) {
             CHECK(massAfter==massBefore+2||massAfter==massBefore+4);
             CHECK(scoreAfter>=scoreBefore); if(scoreAfter>scoreBefore) ++merges;
         }
-        if(has_text(mock,"GAME OVER")) {
+        if(has_text(mock,"ПРОИГРЫШ")) {
             for(unsigned i=0;i<16;++i) {
                 CHECK(after[i]!=0);
                 if(i%4!=3) CHECK(after[i]!=after[i+1]);
@@ -314,7 +317,7 @@ static bool example_test(const char* path,unsigned kind) {
 #include "games_extra_test.inc"
 int main(int argc,char** argv) {
     if(argc!=12) { fprintf(stderr,"Pass paths for all eleven shipped Lua apps\n"); return 2; }
-    if(!allocator_tests()||!vm_tests()||!wall_budget_tests()) return 1;
+    if(!allocator_tests()||!vm_tests()||!wall_budget_tests()||!utf8_display_tests()) return 1;
     for(int i=1;i<argc;++i) {
         const unsigned kind=i==3?1:(i==1||i==2||i==4?0:3);
         if(!example_test(argv[i],kind)) return 1;

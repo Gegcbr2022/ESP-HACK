@@ -1,6 +1,6 @@
--- @name: Minesweeper
+-- @name: Сапёр
 -- @category: Games
--- @description: Seven mines, flags and a protected first reveal.
+-- @description: Семь мин, флаги и безопасный первый ход.
 -- Mines: UP/DOWN previous/next cell, OK reveal, BACK flag. Hold BACK exits.
 -- Seven mines on an8x5 board; the first reveal and its neighbours are safe.
 app = {}
@@ -82,13 +82,13 @@ function app.input(button,event)
     end
 end
 function app.draw()
-    ui.clear();ui.text(0,0,"MINES")
+    ui.clear();ui.text(0,0,"САПЁР")
     if g.mode=="help" then
-        ui.text(0,12,"UP/DOWN move cursor")
-        ui.text(0,24,"OK reveal BACK flag")
-        ui.text(0,36,"First reveal is safe")
-        ui.text(0,48,"Hold BACK exits")
-        ui.text(0,56,"OK starts");return
+        ui.text(0,12,"UP/DN выбор клетки")
+        ui.text(0,24,"OK открыть BK флаг")
+        ui.text(0,36,"Первый ход безопасен")
+        ui.text(0,48,"Выход: держите BK")
+        ui.text(0,56,"OK начать");return
     end
     for cell=1,40 do
         local x,y=2+(cell-1)%8*9,10+(cell-1)//8*9
@@ -101,9 +101,9 @@ function app.draw()
     end
     local x,y=2+(g.cursor-1)%8*9,10+(g.cursor-1)//8*9
     ui.rect(x-1,y-1,11,11)
-    ui.text(80,12,"F:"..tostring(g.flagged).."/7")
-    ui.text(80,24,"Open:"..tostring(g.revealed))
-    ui.text(80,36,g.mode=="over" and "BOOM" or g.mode=="won" and "YOU WIN" or "7 mines")
-    if g.mode~="play" then ui.text(80,48,"OK retry") end
-    ui.text(0,56,"UP/DN OKopen BKflag")
+    ui.text(80,12,"Ф:"..tostring(g.flagged).."/7")
+    ui.text(80,24,"Откр:"..tostring(g.revealed))
+    ui.text(80,36,g.mode=="over" and "МИНА!" or g.mode=="won" and "ПОБЕДА" or "7 мин")
+    if g.mode~="play" then ui.text(80,48,"OK снова") end
+    ui.text(0,56,"UP/DN OK ход BK флаг")
 end

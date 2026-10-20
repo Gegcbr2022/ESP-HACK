@@ -1,6 +1,6 @@
 -- @name: 2048
 -- @category: Games
--- @description: Merge tiles with four buttons
+-- @description: Сдвигайте и объединяйте одинаковые плитки.
 -- 2048: UP/DOWN move vertically, OK right, BACK left. Hold BACK exits.
 app = {}
 
@@ -94,15 +94,15 @@ end
 
 function app.draw()
     ui.clear()
-    ui.text(0, 0, (won and "2048! S:" or "2048 S:") .. tostring(score))
+    ui.text(0, 0, (won and "2048! С:" or "2048 С:") .. tostring(score))
     if mode == "help" then
-        ui.text(0, 14, "UP/DOWN move up/down")
-        ui.text(0, 26, "OK right   BACK left")
-        ui.text(0, 38, "Hold BACK to exit")
-        ui.text(0, 56, "OK starts")
+        ui.text(0, 14, "UP/DN вверх и вниз")
+        ui.text(0, 26, "OK вправо BK влево")
+        ui.text(0, 38, "Выход: держите BK")
+        ui.text(0, 56, "OK начать")
         return
     end
-    ui.text(86, 0, "M:" .. tostring(moves))
+    ui.text(86, 0, "Х:" .. tostring(moves))
     for row = 0, 3 do
         for col = 0, 3 do
             local value = board[row * 4 + col + 1]
@@ -117,6 +117,6 @@ function app.draw()
             end
         end
     end
-    if mode == "over" then ui.text(0, 56, "GAME OVER OK retry")
-    else ui.text(0, 56, "UP/DN OK> BACK<") end
+    if mode == "over" then ui.text(0, 56, "ПРОИГРЫШ OK заново")
+    else ui.text(0, 56, "UP/DN OK> BK<") end
 end
