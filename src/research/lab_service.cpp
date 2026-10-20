@@ -2,6 +2,8 @@
 #include "raw_capture.h"
 #include "triggered_capture.h"
 #include "packet_metadata.h"
+#include "radio_calibration.h"
+#include "trim_math.h"
 #include "../CONFIG.h"
 #include "../../shared/chat_radio.h"
 #include "../../shared/chat_session.h"
@@ -85,15 +87,26 @@ bool waitState(uint8_t wanted, uint32_t timeoutMs = 40) {
     return false;
 }
 bool idle() { ELECHOUSE_cc1101.SpiStrobe(0x36); return waitState(1); }
-void frequency(uint32_t hz) {
-    const uint32_t word = cc1101FrequencyWord(hz);
+bool frequency(uint32_t hz) {
+    uint32_t programmedHz;
+    if(!trimmedFrequencyHz(hz, radioCalibrationPpm(), programmedHz)) {
+        status("Calibrated frequency outside hardware bands");
+        return false;
+    }
+    const uint32_t word = cc1101FrequencyWord(programmedHz);
     ELECHOUSE_cc1101.SpiWriteReg(0x0D, word >> 16);
     ELECHOUSE_cc1101.SpiWriteReg(0x0E, word >> 8);
     ELECHOUSE_cc1101.SpiWriteReg(0x0F, word);
+    if(!ELECHOUSE_cc1101.spiReady()) {
+        errorCount(&LabSnapshot::spiErrors);
+        status("Frequency SPI write failed");
+        return false;
+    }
+    return true;
 }
 bool receive(uint32_t hz, bool calibrate = true) {
     if(!idle()) return false;
-    frequency(hz);
+    if(!frequency(hz)) return false;
     if(calibrate) {
         ELECHOUSE_cc1101.SpiStrobe(0x33);
         if(!waitState(1)) return false;
@@ -135,7 +148,7 @@ bool configure(const RegisterImage& image, uint32_t hz) {
     // RX paths cannot accidentally inherit the high-power table in an imported preset.
     uint8_t zeros[8] = {};
     ELECHOUSE_cc1101.SpiWriteBurstReg(0x3E, zeros, 8);
-    frequency(hz);
+    if(!frequency(hz)) return false;
     bool ok = true;
     for(size_t i = 0; i < kRegisterCount; ++i) {
         uint8_t reg = ELECHOUSE_cc1101.SpiReadReg(i);
