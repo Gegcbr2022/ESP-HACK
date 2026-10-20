@@ -94,7 +94,7 @@ static int32_t radio_worker(void* context) {
     App* app = context;
     uint32_t configured_frequency = 0, receive_since = now_ms();
     uint8_t configured_power = 255;
-    uint32_t next_tx = 0, budget_started = now_ms();
+    uint32_t next_tx = now_ms(), budget_started = next_tx;
     uint32_t airtime_used = 0;
     uint32_t sync_since = 0;
     bool sync_active = false;
