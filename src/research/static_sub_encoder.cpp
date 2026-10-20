@@ -2,6 +2,10 @@
 // Timing/bit order derived from official Flipper1.5.1, commit
 // 9e810dc399e027e48ce07751df72168abbb19065, GPL-3.0-or-later:
 // lib/subghz/protocols/{princeton,came}.c. See docs/STATIC_SUB_PLAYBACK.md.
+// RcSwitch uses protocol1 timing/bit order from sui77/rc-switch2.6.4,
+// commit8d63a4784c6743940eaf24d5410637a5cdac2db6.
+// Princeton1..32 is an explicit ESP-HACK legacy-input extension; official
+// Flipper Princeton remains24-bit. No protocol-name guessing is performed.
 #include "static_sub_encoder.h"
 #include <string.h>
 
@@ -13,9 +17,10 @@ bool dynamicSubProtocol(const char* protocol) {
 StaticSubError encodeStaticSub(const SubInfo& info,int32_t* output,size_t capacity,
                               StaticSubWaveform& result) {
     if(dynamicSubProtocol(info.protocol))return StaticSubError::Dynamic;
-    const bool princeton=!strcmp(info.protocol,"Princeton"),came=!strcmp(info.protocol,"CAME");
-    if(!princeton&&!came)return StaticSubError::Protocol;
-    if(info.kind!=SubKind::Key || (princeton&&info.bits!=24) ||
+    const bool princeton=!strcmp(info.protocol,"Princeton"),came=!strcmp(info.protocol,"CAME"),
+               rcSwitch=!strcmp(info.protocol,"RcSwitch");
+    if(!princeton&&!came&&!rcSwitch)return StaticSubError::Protocol;
+    if(info.kind!=SubKind::Key || ((princeton||rcSwitch)&&(!info.bits||info.bits>32)) ||
        (came&&info.bits!=12&&info.bits!=24) || !info.keyBytes || info.keyBytes>8)return StaticSubError::Key;
     uint64_t key=0;
     for(uint8_t i=0;i<info.keyBytes;++i)key=(key<<8)|info.key[i];
@@ -28,7 +33,7 @@ StaticSubError encodeStaticSub(const SubInfo& info,int32_t* output,size_t capaci
     for(size_t i=2;i<8;++i)if(info.radio.pa[i])return StaticSubError::Radio;
     const uint32_t te=came?320:info.teUs;
     if(!te || te>10000)return StaticSubError::Timing;
-    const uint32_t guard=info.guardTime>=15&&info.guardTime<=72?info.guardTime:30;
+    const uint32_t guard=rcSwitch?31:(info.guardTime>=15&&info.guardTime<=72?info.guardTime:30);
     const uint32_t header=info.bits==12?47:76;
     const uint64_t period=came?uint64_t(1+3*info.bits+header)*320:
                                uint64_t(4*info.bits+1+guard)*te;

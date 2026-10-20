@@ -14,7 +14,9 @@ struct StaticSubWaveform {
     uint8_t repeats;
     bool phaseRotated;
 };
-// Exact static encoders only: Princeton24 with fileTE/Guard_time, CAME12/24
+// Exact named static encoders only: RcSwitch(protocol1)1..32bits,fileTE,
+// +TE/-31TE sync; Princeton1..32bits,fileTE/Guard_time (non24 is an ESP-HACK
+// legacy-input extension, not official Flipper compatibility); CAME12/24
 // fixed320us. Always6periods, <=2048signedintervals and <=5seconds. No allocation.
 // On failure the output buffer and result remain unchanged. No TX authorization.
 StaticSubError encodeStaticSub(const SubInfo& info, int32_t* output, size_t capacity,
