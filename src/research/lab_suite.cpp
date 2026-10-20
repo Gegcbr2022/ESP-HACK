@@ -7,6 +7,8 @@
 #include "lua_apps.h"
 #include "chat_profile.h"
 #include "rf_clock_probe.h"
+#include "radio_calibration.h"
+#include "trim_math.h"
 #include "static_sub_encoder.h"
 #include "file_page.h"
 #include "file_entry.h"
@@ -487,7 +489,7 @@ const char* prepareOpenedFileSend(StaticSubWaveform& generated) {
     if(!describeRadio(openedInfo.radio,openedInfo.frequencyHz,description) ||
        description.modulation!=Modulation::AskOok || description.packetFormat!=PacketFormat::Async ||
        description.crc || description.whitening || description.manchester || description.fec || description.syncMode)
-        return "Передача поддержана\nтолько для OOK RAW,\nPrinceton24 и CAME.";
+        return "Нужен OOK RAW или\nподдерживаемый\nстатический протокол.";
     if(openedInfo.radio.pa[0])return "Многоуровневый ASK:\nпередача не поддержана.";
     for(size_t i=2;i<8;++i)if(openedInfo.radio.pa[i])return "Многоуровневый ASK:\nпередача не поддержана.";
     if(openedInfo.radio.present[0x22]&&(openedInfo.radio.value[0x22]&7)!=1)return "Не подходит PA-профиль\nфайла для OOK.";
@@ -886,6 +888,8 @@ void runRadioLabFiles() {
 
 extern bool setupCC1101();
 void radioLabBootDiagnostics() {
+    const bool calibrationLoaded=research::loadRadioCalibration();
+    Serial.printf("[RFCal] loaded=%u ppm=%ld\n",calibrationLoaded,(long)research::radioCalibrationPpm());
     Serial.printf("[RadioLab] firmware=%s esp_heap=%u crystal_cc1101_assumed=26000000\n",FIRMWARE,ESP.getFreeHeap());
     const bool ready=setupCC1101();
     Serial.printf("[RadioLab] probe=%s part=%02X version=%02X marc=%02X IOCFG0=%02X PKTCTRL0=%02X MDMCFG4=%02X MDMCFG2=%02X readyTO=%lu\n",
@@ -974,7 +978,15 @@ __attribute__((noinline)) void startSerialChatListen(const char* command) {
     }
 }
 __attribute__((noinline)) bool handleIdleSerialCommand(const char* command) {
-    if(!strncmp(command,"sublist ",8)) {
+    if(!strcmp(command,"rfcal"))Serial.printf("[RFCal] ppm=%ld\n",(long)research::radioCalibrationPpm());
+    else if(!strncmp(command,"rfcal ppm ",10)) {
+        int32_t ppm=0;
+        if(!serialChatMainIdle())Serial.println("[RFCal] ERROR requires the idle main menu");
+        else if(!research::parseRadioTrimPpm(command+10,ppm))Serial.println("[RFCal] ERROR signed decimal ppm must be -250..250");
+        else if(!research::saveRadioCalibration(ppm))Serial.println("[RFCal] ERROR calibration not saved");
+        else Serial.printf("[RFCal] SAVED ppm=%ld; nominal channels unchanged\n",(long)research::radioCalibrationPpm());
+    }
+    else if(!strncmp(command,"sublist ",8)) {
         const char* path=command+8;
         if(!inMenu || (strcmp(path,"/subghz")&&!safePath(path)))Serial.println("[SDList] ERROR main menu and /subghz path required");
         else {
@@ -1085,7 +1097,7 @@ void radioLabSerialPoll() {
             else if(!strncmp(command,"chatlisten ",11))startSerialChatListen(command);
             else if((serialChatContext||serialRadioWorkerActive())&&used)Serial.println("[Chat] busy: use chatstat, screen, chatsend TEST123, chatclose or chatstop");
             else if(handleIdleSerialCommand(command)){}
-            else if(used)Serial.println("[RadioLab] commands: chatopen, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfclock, rflisten433, rftest princeton433, sublist /subghz, subinspect /subghz/file.sub, appsdiag, APP_PUT");
+            else if(used)Serial.println("[RadioLab] commands: chatopen, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfcal, rfcal ppm <signed decimal>, rfclock, rflisten433, rftest princeton433, sublist /subghz, subinspect /subghz/file.sub, appsdiag, APP_PUT");
             used=0;overflow=false;
         } else if(!overflow&&c>=32&&c<=126&&size_t(used)+1<sizeof(command))command[used++]=c;
         else overflow=true;
