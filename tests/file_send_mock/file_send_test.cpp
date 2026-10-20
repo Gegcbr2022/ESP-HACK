@@ -50,21 +50,22 @@ static void fixture(uint32_t hz,SubKind kind=SubKind::Raw){
     if(kind==SubKind::Raw)std::strcpy(openedInfo.protocol,"RAW");
     else {std::strcpy(openedInfo.protocol,"Princeton");openedInfo.bits=24;openedInfo.teUs=390;openedInfo.keyBytes=8;openedInfo.key[5]=0xA5;openedInfo.key[6]=0x3A;openedInfo.key[7]=0x53;}
 }
-static void run(std::initializer_list<unsigned> inputEvents,bool expectedSend){
+static void run(std::initializer_list<unsigned> inputEvents,bool expectedSend,TxProfile priorProfile=TxProfile::ShieldedLab){
     CHECK(loadPreset("FM476",radio));CHECK(describeRadio(radio,868350000,settings));
-    settings.agc0=0x42;settings.txLimitMs=1234;profile=TxProfile::ShieldedLab;powerIndex=2;
+    settings.agc0=0x42;settings.txLimitMs=1234;profile=priorProfile;powerIndex=2;
     const RadioSettings saved=settings;const RegisterImage savedRadio=radio;
     expectedHz=openedInfo.frequencyHz;expectedProfile=profile;events=inputEvents;eventAt=0;rendered.clear();
     const unsigned before=transmissions;sendOpenedFile("/subghz/example (test).sub");
     CHECK(transmissions==before+(expectedSend?1:0));
     CHECK(settings.frequencyHz==saved.frequencyHz&&settings.txLimitMs==saved.txLimitMs&&settings.agc0==saved.agc0);
     CHECK(settings.modulation==saved.modulation&&settings.bandwidthHz==saved.bandwidthHz&&settings.syncWord==saved.syncWord);
-    CHECK(profile==TxProfile::ShieldedLab&&powerIndex==2);
+    CHECK(profile==priorProfile&&powerIndex==2);
     CHECK(!std::memcmp(radio.value,savedRadio.value,sizeof radio.value));CHECK(!std::memcmp(radio.present,savedRadio.present,sizeof radio.present));
     CHECK(!std::memcmp(radio.pa,savedRadio.pa,sizeof radio.pa)&&radio.paPresent==savedRadio.paPresent);
 }
 int main(){
     fixture(906400000);run({0,Transmit},true);CHECK(has("906.400"));CHECK(has("Передача завершена"));
+    fixture(906400000);run({Transmit},true,TxProfile::ReceiveOnly);
     fixture(906400000);transmitSuccess=false;run({Transmit},true);CHECK(has("Не передано"));transmitSuccess=true;
     fixture(906400000);run({Cancel},false);fixture(906400000);run({HoldCancel},false);
     fixture(433920000,SubKind::Key);run({Transmit},true);CHECK(waveformCount==300);
