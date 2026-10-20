@@ -552,25 +552,38 @@ const char* prepareOpenedFileSend(StaticSubWaveform& generated) {
     if(openedInfo.radio.pa[0])return "Многоуровневый ASK:\nпередача не поддержана.";
     for(size_t i=2;i<8;++i)if(openedInfo.radio.pa[i])return "Многоуровневый ASK:\nпередача не поддержана.";
     if(openedInfo.radio.present[0x22]&&(openedInfo.radio.value[0x22]&7)!=1)return "Не подходит PA-профиль\nфайла для OOK.";
-    if(!permitLabTx(TxProfile::ShieldedLab,openedInfo.frequencyHz,(generated.durationUs+999)/1000,5000))
-        return "Передача только на\n433.920 / 868.350 МГц.\nЧастота файла сохранена.";
+    if(!permitLabTx(TxProfile::FilePlayback,openedInfo.frequencyHz,(generated.durationUs+999)/1000,5000))
+        return "Не подходит частота\nили длительность\nдля передачи файла.";
+    uint32_t programmedHz;
+    if(!trimmedFrequencyHz(openedInfo.frequencyHz,radioCalibrationPpm(),programmedHz))
+        return "Частота с поправкой\nвне диапазона радио.";
     return nullptr;
 }
 void sendOpenedFile(const char* path) {
+    // The backend separately restores actual radio hardware. This guard keeps
+    // UI settings unchanged on every exit, including cancellation and errors.
+    struct RestoreUi {
+        RadioSettings savedSettings;
+        RegisterImage savedRadio;
+        TxProfile savedProfile;
+        uint8_t savedPower;
+        RestoreUi():savedSettings(settings),savedRadio(radio),savedProfile(profile),savedPower(powerIndex){}
+        ~RestoreUi(){settings=savedSettings;radio=savedRadio;profile=savedProfile;powerIndex=savedPower;}
+    } restoreUi;
     StaticSubWaveform generated={0,0,0,false};const char* error=prepareOpenedFileSend(generated);
     if(error){char detail[256];const char* reason=dynamicSubProtocol(openedInfo.protocol)?"Передача протокола\nне поддержана.":error;
         snprintf(detail,sizeof detail,"Протокол: %.63s\n%s",openedInfo.protocol,reason);message("Отправка",detail);return;}
-    const RadioSettings savedSettings=settings;const RegisterImage savedRadio=radio;
-    const TxProfile savedProfile=profile;const uint8_t savedPower=powerIndex;
     RadioSettings fileSettings;
     if(!describeRadio(openedInfo.radio,openedInfo.frequencyHz,fileSettings)){message("Отправка","Ошибка параметров\nрадио в файле.");return;}
-    settings=fileSettings;settings.txLimitMs=5000;radio=openedInfo.radio;profile=TxProfile::ShieldedLab;powerIndex=1;
+    const TxProfile playbackProfile=TxProfile::FilePlayback;
+    const uint8_t playbackPower=1;
+    settings=fileSettings;settings.txLimitMs=5000;radio=openedInfo.radio;powerIndex=playbackPower;
     resetInput();
     while(true) {
         input();if(back||holdBack)break;
         if(holdOk) {
             uint32_t elapsed=0;int32_t timingError=0;
-            const bool sent=labTransmitRaw(waveform,waveformCount,openedInfo.radio,openedInfo.frequencyHz,profile,powerIndex,5000,elapsed,timingError);
+            const bool sent=labTransmitRaw(waveform,waveformCount,openedInfo.radio,openedInfo.frequencyHz,playbackProfile,playbackPower,5000,elapsed,timingError);
             char result[200];snprintf(result,sizeof(result),"%s\n%lu мс\nПриём устройством\nне подтверждён.",sent?"Передача завершена.":"Не передано: ошибка\nили остановка BACK.",(unsigned long)(elapsed/1000));
             message("Отправка",result);break;
         }
@@ -581,7 +594,7 @@ void sendOpenedFile(const char* path) {
             footer("Держ.OK:слать BACK");display.display();
         }
     }
-    settings=savedSettings;radio=savedRadio;profile=savedProfile;powerIndex=savedPower;resetInput();
+    resetInput();
 }
 void friendlyFileActions(const char* path) {
     static const char* actions[]={"Отправить","О файле","Ещё"};size_t selected=0;resetInput();
@@ -1050,6 +1063,23 @@ __attribute__((noinline)) void startSerialChatListen(const char* command) {
         if(!serialChatListen)restoreReceiveMode();
     }
 }
+__attribute__((noinline)) bool serialPrincetonTestFrequency(const char* command,uint32_t& frequencyHz) {
+    if(!command)return false;
+    if(!strcmp(command,"rftest princeton433")){frequencyHz=433920000;return true;}
+    static const char prefix[]="rftest princeton ";
+    if(strncmp(command,prefix,sizeof(prefix)-1))return false;
+    const char* cursor=command+sizeof(prefix)-1;
+    if(!*cursor)return false;
+    uint32_t frequency=0;
+    for(;*cursor;++cursor) {
+        if(*cursor<'0'||*cursor>'9')return false;
+        const uint32_t digit=uint32_t(*cursor-'0');
+        if(frequency>(UINT32_MAX-digit)/10)return false;
+        frequency=frequency*10+digit;
+    }
+    if(!permitLabTx(TxProfile::FilePlayback,frequency,1,5000))return false;
+    frequencyHz=frequency;return true;
+}
 __attribute__((noinline)) bool handleIdleSerialCommand(const char* command) {
     if(!strcmp(command,"rfcal"))Serial.printf("[RFCal] ppm=%ld\n",(long)research::radioCalibrationPpm());
     else if(!strncmp(command,"rfcal ppm ",10)) {
@@ -1101,18 +1131,21 @@ __attribute__((noinline)) bool handleIdleSerialCommand(const char* command) {
             Serial.printf("[RFListen] peak=%d rssi=%d samples=%lu spi=%lu miso=%lu\n",observed.peakDbm,observed.rssiDbm,(unsigned long)observed.samples,(unsigned long)observed.spiErrors,(unsigned long)observed.misoTimeouts);
         }
     }
-    else if(!strcmp(command,"rftest princeton433")) {
+    else if(!strncmp(command,"rftest princeton",16)) {
+        uint32_t testFrequency=0,programmedHz=0;
         if(!inMenu)Serial.println("[RFTest] busy: return to the main menu");
+        else if(!serialPrincetonTestFrequency(command,testFrequency))Serial.println("[RFTest] ERROR use rftest princeton <supported decimal Hz>");
+        else if(!trimmedFrequencyHz(testFrequency,radioCalibrationPpm(),programmedHz))Serial.println("[RFTest] ERROR calibrated frequency outside hardware bands");
         else {
-            research::SubInfo known;known.kind=research::SubKind::Key;known.frequencyHz=433920000;
+            research::SubInfo known;known.kind=research::SubKind::Key;known.frequencyHz=testFrequency;
             known.bits=24;known.teUs=390;known.keyBytes=8;known.key[5]=0xA5;known.key[6]=0x3A;known.key[7]=0x53;
             snprintf(known.protocol,sizeof known.protocol,"Princeton");research::loadPreset("AM270",known.radio);
             research::StaticSubWaveform generated={};waveformCount=0;
             const auto encoded=research::encodeStaticSub(known,waveform,research::kWaveformCapacity,generated);
             uint32_t elapsed=0;int32_t timing=0;bool sent=false;suspendLegacyReceive();
-            if(encoded==research::StaticSubError::None)sent=research::labTransmitRaw(waveform,generated.count,known.radio,known.frequencyHz,research::TxProfile::ShieldedLab,1,5000,elapsed,timing);
+            if(encoded==research::StaticSubError::None)sent=research::labTransmitRaw(waveform,generated.count,known.radio,known.frequencyHz,research::TxProfile::FilePlayback,1,5000,elapsed,timing);
             restoreReceiveMode();
-            Serial.printf("[RFTest] %s Princeton A53A53 freq=433920000 repeats=6 nominal=0dBm intervals=%u expectedUs=%lu elapsedUs=%lu deltaUs=%ld\n",sent?"PASS":"FAIL",unsigned(generated.count),(unsigned long)generated.durationUs,(unsigned long)elapsed,(long)timing);
+            Serial.printf("[RFTest] %s Princeton A53A53 freq=%lu repeats=6 nominal=0dBm intervals=%u expectedUs=%lu elapsedUs=%lu deltaUs=%ld\n",sent?"PASS":"FAIL",(unsigned long)testFrequency,unsigned(generated.count),(unsigned long)generated.durationUs,(unsigned long)elapsed,(long)timing);
         }
     }
     else if(!strcmp(command,"rfclock")) {
@@ -1175,7 +1208,7 @@ void radioLabSerialPoll() {
             else if(!strncmp(command,"chatlisten ",11))startSerialChatListen(command);
             else if((serialChatContext||serialRadioWorkerActive())&&used)Serial.println("[Chat] busy: use chatstat, screen, chatedit, chatsend TEST123, chatclose or chatstop");
             else if(handleIdleSerialCommand(command)){}
-            else if(used)Serial.println("[RadioLab] commands: chatopen, chatedit, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfcal, rfcal ppm <signed decimal>, rfclock, rflisten433, rftest princeton433, sublist /subghz, subinspect /subghz/file.sub, appsdiag, APP_PUT");
+            else if(used)Serial.println("[RadioLab] commands: chatopen, chatedit, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868 or hz <decimal>, chatstop, screen, rfdiag, rfcal, rfcal ppm <signed decimal>, rfclock, rflisten433, rftest princeton433 or princeton <Hz>, sublist /subghz, subinspect /subghz/file.sub, appsdiag, APP_PUT");
             used=0;overflow=false;
         } else if(!overflow&&c>=32&&c<=126&&size_t(used)+1<sizeof(command))command[used++]=c;
         else overflow=true;
