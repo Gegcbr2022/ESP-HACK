@@ -70,6 +70,7 @@ static void radio_configure(uint32_t frequency, uint8_t power) {
     furi_hal_subghz_set_frequency_and_path(frequency);
     furi_hal_gpio_init(furi_hal_subghz_get_data_gpio(), GpioModeInput, GpioPullNo, GpioSpeedLow);
     radio_rx();
+    FURI_LOG_I(TAG, "RX profile Hz=%lu PAindex=%u", frequency, power);
 }
 static bool radio_transmit(const uint8_t* wire, size_t length) {
     const GpioPin* pin = furi_hal_subghz_get_data_gpio();
@@ -121,6 +122,8 @@ static int32_t radio_worker(void* context) {
                     add_history(app, app->session.received.source, false, app->session.received.text);
                     if(!app->recipient) app->recipient = app->session.received.source;
                     notify = true;
+                    FURI_LOG_I(TAG, "message RX source=%04X id=%lu bytes=%u", app->session.received.source,
+                               app->session.received.message, (unsigned)app->session.received.length);
                 }
             } else ++app->radio_errors;
             unlock(app);
@@ -134,9 +137,9 @@ static int32_t radio_worker(void* context) {
         lock(app);
         app->rssi = furi_hal_subghz_get_rssi();
         if((uint32_t)(now - budget_started) >= 60000u) { budget_started = now; airtime_used = 0; }
-        /* Finite airtime in each local60s window. Reserve the full200ms timeout.
+        /* Finite airtime in each local60s window. Reserve250ms for timeout/rearm.
          * Regional sliding-window/channel rules can impose stricter limits. */
-        bool busy = signal || app->rssi > -75.0f || !chat_time_reached(now, next_tx) || airtime_used > 400u;
+        bool busy = signal || app->rssi > -75.0f || !chat_time_reached(now, next_tx) || airtime_used >= 350u;
         size = chat_session_poll(&app->session, now, busy, wire, sizeof(wire));
         unlock(app);
         if(size) {
@@ -149,6 +152,7 @@ static int32_t radio_worker(void* context) {
             if(allowed) airtime_used += duration + 2u;
             if(ok) ++app->tx_packets;
             else { ++app->radio_errors; snprintf(app->status, sizeof(app->status), "TX blocked/timeout"); }
+            FURI_LOG_I(TAG, "packet TX bytes=%u result=%u elapsedMs=%lu", (unsigned)size, ok, duration);
             unlock(app);
             next_tx = now_ms() + 100u; receive_since = now_ms();
         }

@@ -69,6 +69,14 @@ The official HAL packet reader ignores caller capacity, so the app provides a
 CRC-bad packets autoflush, and a1-second recovery bounds stuck partial RX.
 TX waits at most200ms in the radio worker before idle/flush/rearm.
 
+Pending RX recovery regression: in an authorized laboratory, transmit a packet
+with valid sync/length but deliberately wrong CC1101 hardware CRC, then a valid
+chat packet. Verify the valid packet is received after at most the next1-second
+recovery cycle. Repeat with a truncated packet that leaves RX active, then with
+an idle interval longer than1second. Capture the Flipper CLI log (`EspChat`) and
+the sender's serial log. These HAL/GDO/FIFO paths have been compiled, but have no
+host radio mock and have not been run on hardware.
+
 This is unencrypted, unauthenticated laboratory text chat. Do not send secrets.
 IDs, discovery and ACKs can be spoofed. CRCs detect accidental corruption, not
 attackers. Reception, packet loss, FIFO recovery, PA output, regional behavior,
