@@ -123,8 +123,26 @@ Controlled physical testing before saving a trim found valid Flipper-to-ESP
 plaintext packets at an ESP programmed frequency of 433.960, 433.970 and
 433.980 MHz while the peer stayed at nominal 433.920 MHz. The corresponding
 packet frequency estimates were approximately +9,521, 0 and -9,521 Hz, with
-two valid-CRC messages at each point and LQI 46–47. This supports testing
-**+115 ppm on that particular module**. It does not establish the correction
-for other modules or prove post-save bidirectional chat. Final firmware build,
-saved-value readback, reboot persistence and exact-text tests in both directions
-must be recorded separately in the hardware report.
+two valid-CRC messages at each point and LQI 46–47. Based on this controlled
+measurement, **+115 ppm was explicitly saved on that particular module**.
+It does not establish a correction for other modules; their default stays zero.
+
+Post-save physical testing at source `d63f1ca` passed at nominal 433.920 MHz
+using the normal ESP32 chat UI and Unleashed **086e / `e7e4e179` CLI** on the
+peer. ESP32 accepted the controlled Flipper messages with three packets, zero
+CRC errors and last packet frequency estimate zero. One manual TEST123 send
+completed, and the physical Flipper CLI displayed `ESP-HACK: TEST123`.
+The saved +115 ppm value survived reset; a save attempted while the worker was
+busy was rejected. Closing chat restored the main menu, and the test completed
+without a stack panic. This verifies short plaintext traffic in both directions
+on this calibrated device, using normal CRC-autoflush reception (`PKTCTRL1=0C`).
+
+The software clear-channel gate was also corrected in `d63f1ca`: automatic
+chat uses measured RSSI against -75 dBm and always defers during packet sync.
+The hardware CS bit alone had remained asserted at the -88 dBm background
+level and blocked sending. The change uses cached 10 ms RSSI samples and does
+not alter `MCSM1=30` or the RF wire profile. See
+[chat compatibility](FLIPPER_CHAT_COMPATIBILITY.md) for controls and validation
+limits. Enhanced GUI operation and a companion-FAP physical launch were not
+tested by this CLI exchange; calibration is relative to this known peer, not
+an absolute carrier-frequency or output-power measurement.
