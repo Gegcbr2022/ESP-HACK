@@ -497,6 +497,10 @@ void runSubGHz() {
           restoreReceiveMode();
           resetButtonStates();
           OLED_printSubGHzMenu(display, menuIndex);
+        } else if (menuIndex == 7) {
+          runSubGhzChat();
+          resetButtonStates();
+          OLED_printSubGHzMenu(display, menuIndex);
         }
       }
       if (buttonBack.isClick()) {

@@ -29,6 +29,7 @@ def run(build):
                 str(here / "test_pocket.cpp")]
     command += [str(root / "src/interface/menu" / name) for name in
                 ("pocket_menu.cpp", "list_menu.cpp", "pages_menu.cpp", "wii_menu.cpp", "dsi_menu.cpp")]
+    command += [str(root / "src/interface/submenu" / name) for name in ("list_submenu.cpp", "roll_submenu.cpp")]
     command += ["-o", str(executable)]
     subprocess.run(command, check=True)
     subprocess.run([str(executable), str(snapshots)], check=True)

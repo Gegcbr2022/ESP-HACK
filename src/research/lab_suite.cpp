@@ -625,6 +625,17 @@ void chatApp(){
 }
 }
 
+void runSubGhzChat() {
+    suspendLegacyReceive();
+    while(!research::labStop()) { showNotice("Waiting for radio worker to stop"); delay(10); }
+    resetInput();
+    chatApp();
+    // A completed worker must release SPI ownership before legacy RX resumes.
+    while(!research::labStop()) { showNotice("Waiting for chat radio stop"); delay(10); }
+    restoreReceiveMode();
+    resetInput();
+}
+
 void runRadioLab() {
     using namespace research;
     suspendLegacyReceive();

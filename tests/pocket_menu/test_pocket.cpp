@@ -1,5 +1,6 @@
 #include "interface/interface.h"
 #include "interface/menu/appearance_config.h"
+#include "menu/subghz_items.h"
 #include "U8g2_for_Adafruit_GFX.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,6 +60,9 @@ static void navigationTests() {
     CHECK(window.selected<8);CHECK(window.count==3);CHECK(window.first+window.count<=8);
     CHECK(window.selected>=window.first&&window.selected<window.first+window.count);
   }
+  CHECK(SUBGHZ_MENU_ITEM_COUNT==8);CHECK(!strcmp(subghzMenuItems[0],"Read"));
+  CHECK(!strcmp(subghzMenuItems[6],"Radio Lab"));CHECK(!strcmp(subghzMenuItems[7],"Chat"));
+  CHECK((0+SUBGHZ_MENU_ITEM_COUNT-1)%SUBGHZ_MENU_ITEM_COUNT==7);
 }
 static void renderTests(const char* directory) {
   DisplayType display;
@@ -84,6 +88,11 @@ static void renderTests(const char* directory) {
     OLED_printMenuAnimated(display,item,mainMenuStep(item,1));
   }
   menu=MENU_STYLE_POCKET;
+  for(submenu=0;submenu<2;++submenu)for(uint8_t item=0;item<SUBGHZ_MENU_ITEM_COUNT;++item) {
+    const unsigned before=display.frames;
+    displaySubmenu(display,subghzMenuItems,SUBGHZ_MENU_ITEM_COUNT,item);
+    CHECK(display.frames>before);CHECK(hasLabel(display,subghzMenuItems[item]));
+  }
   for(byte item=0;item<8;++item) {
     char path[1024];snprintf(path,sizeof path,"%s/pocket_%u.pgm",directory,unsigned(item));
     OLED_printMenu(display,item);CHECK(display.writePgm(path));

@@ -10,6 +10,10 @@ UP/DOWN move through the same eight categories; OK opens the selected one.
 Settings → Interface → Menu offers Pages, List, Wii, DSi and Pocket. Existing
 category IDs and functions remain unchanged.
 
+Chat is directly available at **SubGHz → Chat**. From the first SubGHz item,
+Read, press UP once to reach it. Radio Lab remains available at its existing
+position, with its original Chat entry as well.
+
 The first boot after upgrading changes only the saved main menu style to
 Pocket. The existing eight-byte appearance record stays at EEPROM32..39 with
 a new signature. Valid submenu, color and standby selections are retained;
