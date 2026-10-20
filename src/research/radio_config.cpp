@@ -94,6 +94,7 @@ bool decodeCustomPreset(const uint8_t* data, size_t length, RegisterImage& image
     while(at + 1 < length) {
         const uint8_t address = data[at++], value = data[at++];
         if(address == 0 && value == 0) { terminated = true; break; }
+        if(address == 0) return invalid(error, "Flipper reserves address zero as preset terminator");
         if(address >= kRegisterCount) return invalid(error, "Preset writes a strobe/status/FIFO address");
         if(candidate.present[address]) return invalid(error, "Duplicate custom register");
         candidate.set(address, value);
@@ -110,7 +111,7 @@ size_t encodeCustomPreset(const RegisterImage& image, uint8_t* output, size_t ca
     if(!output || !validateRegisterImage(image)) return 0;
     size_t need = 10;
     for(size_t i = 0; i < kRegisterCount; ++i) if(image.present[i]) need += 2;
-    if(capacity < need || (image.present[0] && !image.value[0])) return 0;
+    if(capacity < need || image.present[0]) return 0;
     size_t at = 0;
     for(size_t i = 0; i < kRegisterCount; ++i) if(image.present[i]) {
         output[at++] = uint8_t(i); output[at++] = image.value[i];
@@ -264,7 +265,8 @@ bool encodeRadioSettings(const RadioSettings& s, RegisterImage& image, RadioSett
     candidate.set(0x0D, uint8_t(word >> 16));
     candidate.set(0x0E, uint8_t(word >> 8));
     candidate.set(0x0F, uint8_t(word));
-    candidate.set(0x00, 0x2E); candidate.set(0x01, 0x2E);
+    // Address zero is the Flipper custom-preset terminator, not an exportable write.
+    candidate.set(0x01, 0x2E);
     candidate.set(0x02, s.packetFormat == PacketFormat::Async ? 0x0D : 0x06);
     candidate.set(0x03, registerBandwidth(bwBits) < 325000.0 ? 0x47 : 0x07);
     candidate.set(0x04, uint8_t(s.syncWord >> 8)); candidate.set(0x05, uint8_t(s.syncWord));

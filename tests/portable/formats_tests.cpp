@@ -132,9 +132,13 @@ static bool testMalformedPresets() {
     CHECK(!decodeCustomPreset(bytes,preset->size-1,image));
     bytes[0] = 0x30; CHECK(!decodeCustomPreset(bytes,preset->size,image));
     memcpy(bytes,preset->data,preset->size);
+    bytes[0] = 0; CHECK(!decodeCustomPreset(bytes,preset->size,image));
+    memcpy(bytes,preset->data,preset->size);
     bytes[2] = bytes[0]; CHECK(!decodeCustomPreset(bytes,preset->size,image));
     memcpy(bytes,preset->data,preset->size);
     bytes[34] = 1; CHECK(!decodeCustomPreset(bytes,preset->size,image));
+    CHECK(loadPreset("AM650",image));
+    image.set(0,0x2E); CHECK(!encodeCustomPreset(image,bytes,sizeof bytes));
     CHECK(loadPreset("AM650",image));
     image.set(1,0x0D); CHECK(!validateRegisterImage(image));
     CHECK(loadPreset("FM238",image));
@@ -200,6 +204,15 @@ static bool testWriter() {
     CHECK(parse(customOutput));
     SubParser p; CHECK(p.feed(customOutput.data(),customOutput.size())); CHECK(p.finish());
     CHECK(p.info().radio.value[0x15] == 4); CHECK(p.info().rawCompatible);
+    // Advanced async images must export without address zero, which Flipper's
+    // official loader treats as terminator regardless of the following value.
+    RadioSettings advanced; advanced.modulation=Modulation::AskOok;
+    advanced.packetFormat=PacketFormat::Async; advanced.crc=false; advanced.syncMode=0;
+    CHECK(encodeRadioSettings(advanced,image)); CHECK(!image.present[0]);
+    std::string advancedOutput; RawWriter advancedWriter(append,&advancedOutput);
+    CHECK(advancedWriter.beginCustom(433920000,image));
+    CHECK(advancedWriter.pulse(500)); CHECK(advancedWriter.pulse(-500)); CHECK(advancedWriter.finish());
+    CHECK(parse(advancedOutput));
     std::string reject;
     RawWriter invalid(append,&reject); CHECK(invalid.begin(433920000,"AM270"));
     CHECK(!invalid.pulse(-1)); CHECK(!invalid.finish());

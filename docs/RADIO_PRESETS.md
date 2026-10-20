@@ -37,12 +37,15 @@ Validation includes:
 - Host RSSI threshold is -130..0 dBm; host RX deadline 1..3600000 ms; host TX deadline 1..10000 ms. These fields require application enforcement. The RSSI threshold is not advertised as an absolute CC1101 carrier-sense register, and host RX timeout is not the WOR timer.
 - Custom presets reject duplicate register writes, unsupported formats/modulations, missing modem configuration, status/strobe/FIFO addresses, and a GDO1 setting that would drive the shared SPI MISO line. Frequency/channel offsets are rejected; the file's Frequency header is authoritative.
 
+Custom import/export also rejects writes to IOCFG2 (address zero): the actual pinned Flipper HAL treats any zero register address as the terminator. The advanced encoder therefore omits IOCFG2. Flipper controls that pin separately for its RF switch. This source-level constraint is stricter than a literal reading of the file-format documentation's `00 00` marker.
+
 The configuration encoder is not an RF optimizer. In particular, TI DN022 says OOK/ASK gain-control settings require measurements over the full input dynamic range. Retaining or choosing a register profile cannot establish that a receive failure is physically fixed.
 
 ## Sources
 
 - [Pinned official CC1101 preset arrays](https://github.com/flipperdevices/flipperzero-firmware/blob/9e810dc399e027e48ce07751df72168abbb19065/lib/subghz/devices/cc1101_configs.c)
 - [Pinned Flipper preset labels](https://github.com/flipperdevices/flipperzero-firmware/blob/9e810dc399e027e48ce07751df72168abbb19065/lib/subghz/subghz_setting.c)
+- [Pinned Flipper custom-preset loader](https://github.com/flipperdevices/flipperzero-firmware/blob/9e810dc399e027e48ce07751df72168abbb19065/targets/f7/furi_hal/furi_hal_subghz.c)
 - [TI CC1101 datasheet SWRS061I](https://www.ti.com/lit/ds/symlink/cc1101.pdf), sections 12–17, 27, 29 and Table 3.
 - [TI DN022 OOK/ASK register settings](https://www.ti.com/lit/an/swra215e/swra215e.pdf)
 

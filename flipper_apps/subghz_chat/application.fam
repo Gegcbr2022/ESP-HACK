@@ -1,0 +1,12 @@
+App(
+    appid="esphack_subghz_chat",
+    name="Sub-GHz Chat",
+    apptype=FlipperAppType.EXTERNAL,
+    entry_point="subghz_chat_app",
+    requires=["gui", "notification"],
+    stack_size=4096,
+    fap_category="Sub-GHz",
+    fap_version="1.0",
+    fap_description="Bounded CC1101 laboratory text chat with ESP-HACK",
+    fap_author="ESP-HACK contributors",
+)
