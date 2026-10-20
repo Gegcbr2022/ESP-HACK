@@ -2,9 +2,11 @@
 #include "sub_file.h"
 #include "static_sub_encoder.h"
 #include "trim_math.h"
+#include "test_decoder.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdarg>
 #include <string>
 #include <vector>
 using namespace research;
@@ -12,24 +14,31 @@ static unsigned checks;
 #define CHECK(x) do{++checks;if(!(x)){std::fprintf(stderr,"FAIL line%d: %s\n",__LINE__,#x);std::exit(1);}}while(0)
 RadioSettings settings;RegisterImage radio;TxProfile profile=TxProfile::ReceiveOnly;uint8_t powerIndex;
 SubInfo openedInfo;bool openedFileValid;int32_t waveform[kWaveformCapacity];size_t waveformCount;
-bool back,holdBack,holdOk;
+bool back,holdBack,holdOk,ok;
+bool serialCaptureContext,serialCaptureSavePending;
+uint32_t sweepStep=25000;ChatMode chatFormat=ChatMode::FlipperPlaintext;
+// The UI fixture uses only this fixed short preset label; custom/imported
+// preset names and the display driver's clipping are outside this radio test.
+char activePreset[6]="AM270";
 static int32_t trim;
 static unsigned transmissions,resets,messages;
 static uint32_t expectedHz;static TxProfile expectedProfile;
 static bool transmitSuccess=true;
 static LabSnapshot captureState={};static bool stopSuccess=true,waveWrite=true,uniqueSuccess=true;
 static size_t captureCount=4;static unsigned savedCalls;
+static bool startSuccess=true,lastAutomatic;static unsigned captureStarts;
 char notice[80]="",captureSavedPath[112]="";
 static std::vector<unsigned> events;static size_t eventAt;
 static std::vector<std::string> rendered;
-enum { Cancel=1,HoldCancel=2,Transmit=4 };
-void input(){CHECK(eventAt<events.size());unsigned e=events[eventAt++];back=e&Cancel;holdBack=e&HoldCancel;holdOk=e&Transmit;}
+enum { Cancel=1,HoldCancel=2,Transmit=4,Save=8 };
+void input(){CHECK(eventAt<events.size());unsigned e=events[eventAt++];back=e&Cancel;holdBack=e&HoldCancel;holdOk=e&Transmit;ok=e&Save;}
 void resetInput(){++resets;}
 bool frame(){return true;}
 void title(const char*){}
 void line(unsigned,const char* text){rendered.push_back(text);}
 void footer(const char*){}
 struct Display {void display(){}} display;
+struct MockSerial {void printf(const char* format,...){char text[256];va_list args;va_start(args,format);std::vsnprintf(text,sizeof(text),format,args);va_end(args);rendered.push_back(text);}} Serial;
 void message(const char*,const char* text){++messages;rendered.push_back(text);}
 bool printPlaybackRadioState(const char*){return true;}
 void showNotice(const char* text){std::snprintf(notice,sizeof notice,"%s",text);}
@@ -39,6 +48,7 @@ namespace research {
 int32_t radioCalibrationPpm(){return trim;}
 bool labStop(){return stopSuccess;}
 LabSnapshot labSnapshot(){return captureState;}
+bool labStart(LabMode mode,const RegisterImage&,const RadioSettings&,TxProfile,uint8_t,uint32_t,ChatMode,bool diagnostic,bool automatic){CHECK(mode==LabMode::Raw&&!diagnostic);++captureStarts;lastAutomatic=automatic;return startSuccess;}
 size_t labCopyPulses(int32_t* output,size_t capacity){CHECK(output==waveform&&capacity==kWaveformCapacity);for(size_t i=0;i<captureCount;++i)output[i]=i%2?-100:100;return captureCount;}
 bool labTransmitRaw(const int32_t* pulses,size_t count,const RegisterImage& image,uint32_t hz,TxProfile tx,uint8_t power,uint32_t limit,uint32_t& elapsed,int32_t& timing){
     ++transmissions;CHECK(hz==expectedHz);CHECK(tx==TxProfile::FilePlayback);CHECK(power==1&&limit==5000);
@@ -115,5 +125,13 @@ int main(){
     CHECK(!std::strcmp(captureProgressText(visual),"Приём окончен: повтор"));visual.rawThresholdReady=false;
     CHECK(!std::strcmp(captureProgressText(visual),"Ошибка приёма: назад"));visual.rawThresholdReady=true;visual.connected=false;
     CHECK(!std::strcmp(captureProgressText(visual),"Ошибка приёма: назад"));
+    settings.packetFormat=PacketFormat::Async;events={0,Cancel};eventAt=0;rendered.clear();captureState={};captureState.active=captureState.connected=true;
+    captureApp(false,true);CHECK(lastAutomatic&&captureStarts==1);CHECK(has("Настройка по шуму"));
+    events={Cancel};eventAt=0;captureApp(false);CHECK(!lastAutomatic&&captureStarts==2);
+    startSuccess=false;rendered.clear();captureApp(false,true);CHECK(captureStarts==3&&has("Ошибка приёма: назад"));startSuccess=true;
+    settings.packetFormat=PacketFormat::Fifo;captureApp(false,true);CHECK(captureStarts==3);settings.packetFormat=PacketFormat::Async;
+    captureState={};captureState.captureTriggered=captureState.captureComplete=true;captureState.rawThresholdReady=true;
+    serialCaptureContext=serialCaptureSavePending=true;events={0,Cancel};eventAt=0;rendered.clear();
+    captureApp(false,true);CHECK(!serialCaptureSavePending&&has("[Capture] SAVED path=/subghz/LabRAW_0001.sub"));serialCaptureContext=false;
     std::printf("File send UI: %u checks passed (actual extracted flow, production codecs, mocked radio)\n",checks);
 }
