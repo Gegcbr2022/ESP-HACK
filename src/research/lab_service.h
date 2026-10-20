@@ -17,6 +17,8 @@ struct LabSnapshot {
     uint8_t rawThresholdSamples;
     bool rawThresholdReady, rawThresholdAuto;
     uint32_t captureRearms, captureShortDiscarded, captureArmingDropped, captureArmingRejected;
+    uint32_t captureQualifiedPulses;
+    bool captureRssiQualified;
     uint16_t sweepIndex, sweepPasses;
     int16_t sweep[kSweepBins], peakHold[kSweepBins];
     uint8_t registers[kRegisterCount];

@@ -331,6 +331,7 @@ void publishRaw(const TriggeredCapture& trigger, const raw_capture::Snapshot& co
     state.dropped = trigger.dropped(); state.rejected = trigger.rejected();
     state.captureRearms=trigger.rearmCount();state.captureShortDiscarded=trigger.discardedShort();
     state.captureArmingDropped=trigger.discardedArmingDropped();state.captureArmingRejected=trigger.discardedArmingRejected();
+    state.captureQualifiedPulses=trigger.postTriggerPulses();state.captureRssiQualified=trigger.rssiQualified();
     portEXIT_CRITICAL(&lock);
 }
 void drainRaw(TriggeredCapture& trigger, bool finishing = false) {
@@ -477,8 +478,10 @@ void worker(void*) {
     bool configured = configure(activeImage, activeSettings.frequencyHz);
     if(configured && mode == LabMode::Chat) status(diagnostic ? "Diagnostic RX-only30s; manual CRC" : "Chat RX ready");
     if(configured && mode==LabMode::Raw)configured=prepareRawThreshold();
-    if(configured && (mode == LabMode::Raw || mode == LabMode::Explorer))
+    if(configured && (mode == LabMode::Raw || mode == LabMode::Explorer)) {
         configured = raw_capture::start(CC1101_GDO0);
+        if(!configured)status("No internal RAM for RAW timestamps");
+    }
     const uint32_t rawStartedUs = raw_capture::snapshot().startedUs;
     TriggeredCapture rawTrigger(capture, kWaveformCapacity, activeSettings.rssiThresholdDbm, rawStartedUs);
     if(configured && mode == LabMode::Raw) status("Armed: waiting RSSI threshold");

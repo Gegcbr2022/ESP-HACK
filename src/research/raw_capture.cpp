@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <driver/gpio.h>
+#include <esp_heap_caps.h>
 #include <soc/gpio_struct.h>
 
 namespace research {
@@ -10,7 +11,9 @@ namespace {
 
 static_assert((kCapacity & (kCapacity - 1)) == 0, "Ring must be a power of two");
 DRAM_ATTR int32_t intervals[kCapacity];
-DRAM_ATTR uint32_t endedAt[kCapacity];
+// One retained internal bank avoids the ESP32 static-DRAM segment limit.
+// Allocate before attaching IRQ; ISR never allocates or touches PSRAM.
+DRAM_ATTR uint32_t* endedAt;
 DRAM_ATTR uint16_t head = 0;
 DRAM_ATTR uint16_t tail = 0;
 DRAM_ATTR uint16_t used = 0;
@@ -52,6 +55,9 @@ void IRAM_ATTR edgeInterrupt(void*) {
 bool start(uint8_t pin) {
     if (!GPIO_IS_VALID_GPIO(pin)) return false;
     stop();
+    if(!endedAt) endedAt=static_cast<uint32_t*>(heap_caps_malloc(
+        kCapacity*sizeof(uint32_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+    if(!endedAt)return false;
     pinMode(pin, INPUT);
     portENTER_CRITICAL(&captureMux);
     head = tail = used = 0;
