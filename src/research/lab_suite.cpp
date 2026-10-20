@@ -2,6 +2,7 @@
 #include "lab_service.h"
 #include "sub_file.h"
 #include "raw_capture.h"
+#include "capture_history.h"
 #include "test_decoder.h"
 #include "app_install.h"
 #include "lua_apps.h"
@@ -59,6 +60,8 @@ bool serialChatOpenPending;
 bool serialChatEditPending, serialChatEditing;
 bool serialCaptureContext, serialCaptureOpenPending, serialCaptureSavePending, serialCaptureCloseRequested;
 bool serialCaptureTraceRequested;
+bool serialCaptureHistoryContext;
+bool serialCapturePlayPending;
 char captureSavedPath[112]="";
 
 __attribute__((noinline)) void printChatStatus() {
@@ -307,8 +310,8 @@ bool selectPreset(size_t index) {
     settings.rxTimeoutMs = previous.rxTimeoutMs; settings.txLimitMs = previous.txLimitMs;
     radio = next; snprintf(activePreset, sizeof(activePreset), "%s", p->name); return true;
 }
-bool startMode(LabMode mode, bool autoRawThreshold=false) {
-    if(!labStart(mode, radio, settings, profile, powerIndex, sweepStep, chatFormat, false, autoRawThreshold)) { showNotice("Worker start failed"); return false; }
+bool startMode(LabMode mode, bool autoRawThreshold=false, bool multiRawHistory=false) {
+    if(!labStart(mode, radio, settings, profile, powerIndex, sweepStep, chatFormat, false, autoRawThreshold, multiRawHistory)) { showNotice("Worker start failed"); return false; }
     return true;
 }
 bool saveCapture() {
@@ -366,6 +369,15 @@ void captureApp(bool protocol, bool autoThreshold=false) {
         }
     }
     labStop(); resetInput();
+}
+#include "capture_history_ui.inc"
+__attribute__((noinline)) HistoryUiSnapshot historyUiSnapshot() {
+    const LabSnapshot state=labSnapshot();HistoryUiSnapshot result;
+    result.active=state.active;result.thresholdReady=state.rawThresholdReady;
+    result.full=state.captureHistoryFull;result.count=state.captureHistoryCount;
+    result.thresholdDbm=state.rawThresholdDbm;result.rssiDbm=state.rssiDbm;
+    for(size_t i=0;i<4;++i)result.entries[i]=state.captureHistory[i];
+    return result;
 }
 void monitorApp(bool sweep) {
     if(!startMode(sweep ? LabMode::Sweep : LabMode::Monitor)) return;
@@ -591,6 +603,30 @@ const char* prepareOpenedFileSend(StaticSubWaveform& generated) {
     if(!trimmedFrequencyHz(openedInfo.frequencyHz,radioCalibrationPpm(),programmedHz))
         return "Частота с поправкой\nвне диапазона радио.";
     return nullptr;
+}
+__attribute__((noinline)) void playSavedCaptureHistory() {
+    if(!serialCaptureContext||!serialCaptureHistoryContext||serialCaptureCloseRequested||captureHistorySelection>=4||
+       !(captureHistorySavedMask&(1U<<captureHistorySelection))||captureHistorySavedPathSlot!=int8_t(captureHistorySelection)||!captureSavedPath[0]) {
+        Serial.println("[Capture] PLAY ERROR select the last saved history slot");return;
+    }
+    if(!labStop()){Serial.println("[Capture] PLAY ERROR radio still active");return;}
+    struct RestoreUi {
+        RadioSettings savedSettings;RegisterImage savedRadio;SubInfo savedInfo;
+        TxProfile savedProfile;uint8_t savedPower;
+        RestoreUi():savedSettings(settings),savedRadio(radio),savedInfo(openedInfo),savedProfile(profile),savedPower(powerIndex){}
+        ~RestoreUi(){settings=savedSettings;radio=savedRadio;openedInfo=savedInfo;openedFileValid=false;profile=savedProfile;powerIndex=savedPower;waveformCount=0;}
+    } restore;
+    if(!inspectFile(captureSavedPath)){Serial.printf("[Capture] PLAY ERROR SD reopen=%s\n",notice);return;}
+    StaticSubWaveform generated={};const char* error=prepareOpenedFileSend(generated);
+    if(error){Serial.printf("[Capture] PLAY ERROR unsupported=%s\n",error);return;}
+    RadioSettings playbackSettings;
+    if(!describeRadio(openedInfo.radio,openedInfo.frequencyHz,playbackSettings)){Serial.println("[Capture] PLAY ERROR saved radio profile");return;}
+    settings=playbackSettings;settings.txLimitMs=5000;radio=openedInfo.radio;powerIndex=1;
+    uint32_t elapsed=0;int32_t timing=0;
+    const bool beforeReady=printPlaybackRadioState("capture-play-before");
+    const bool transmitted=beforeReady&&labTransmitRaw(waveform,waveformCount,openedInfo.radio,openedInfo.frequencyHz,TxProfile::FilePlayback,1,5000,elapsed,timing);
+    const bool afterReady=printPlaybackRadioState("capture-play-after");
+    Serial.printf("[Capture] PLAY result=%s path=%s slot=%u freq=%lu intervals=%lu elapsedUs=%lu\n",transmitted&&afterReady?"PASS":"FAIL",captureSavedPath,unsigned(captureHistorySelection+1),(unsigned long)openedInfo.frequencyHz,(unsigned long)waveformCount,(unsigned long)elapsed);
 }
 void sendOpenedFile(const char* path) {
     // The backend separately restores actual radio hardware. This guard keeps
@@ -981,7 +1017,7 @@ void runRadioLab() {
     const size_t count=sizeof(apps)/sizeof(apps[0]);size_t selected=0;resetInput();
     while(true){
         input();if(back||holdBack)break;if(up)selected=(selected+count-1)%count;if(down)selected=(selected+1)%count;
-        if(ok){switch(selected){case 0:if(settings.packetFormat!=PacketFormat::Async)selectPreset(0);captureApp(false,true);break;case 1:browser(false,false,true);break;case 2:chatApp();break;case 3:simpleRadioSettings();break;case 4:radioLabAdvanced();break;}resetInput();}
+        if(ok){switch(selected){case 0:if(settings.packetFormat!=PacketFormat::Async)selectPreset(0);captureHistoryApp();break;case 1:browser(false,false,true);break;case 2:chatApp();break;case 3:simpleRadioSettings();break;case 4:radioLabAdvanced();break;}resetInput();}
         if(frame()){char heading[40];snprintf(heading,sizeof(heading),"Радио %lu.%03lu",(unsigned long)(settings.frequencyHz/1000000),(unsigned long)((settings.frequencyHz/1000)%1000));title(heading);for(size_t row=0;row<4;++row){size_t i=(selected+row)%count;display.setCursor(0,17+row*9);display.print(row?"  ":"> ");ui_text::print(display,apps[i]);}footer("UP/DN выбор OK:вход");display.display();}
     }
     // Ownership cannot pass back to legacy code until the worker has stopped.
@@ -1111,6 +1147,7 @@ __attribute__((noinline)) void printCaptureStatus() {
     if(captureSavedPath[0])Serial.printf("[Capture] saved=%s\n",captureSavedPath);
     Serial.printf("[Capture] rearms=%lu short=%lu armingDropped=%lu armingRejected=%lu qualifiedPulses=%lu rssiQualified=%u\n",(unsigned long)s.captureRearms,(unsigned long)s.captureShortDiscarded,(unsigned long)s.captureArmingDropped,(unsigned long)s.captureArmingRejected,(unsigned long)s.captureQualifiedPulses,s.captureRssiQualified);
     const RawTraceInfo trace=labRawTraceInfo();
+    Serial.printf("[Capture] historyCount=%u historyFull=%u duplicates=%lu selected=%u savedMask=%u\n",s.captureHistoryCount,s.captureHistoryFull,(unsigned long)s.captureHistoryDuplicates,unsigned(captureHistorySelection+1),captureHistorySavedMask);
     Serial.printf("[Capture] lastRejectedCause=%u lastRejectedUs=%lu traceEnabled=%u traceStarted=%u traceFrozen=%u traceCount=%u traceOverwritten=%lu\n",s.lastRejectedCause,(unsigned long)s.lastRejectedUs,trace.enabled,trace.started,trace.frozen,trace.count,(unsigned long)trace.dropped);
 }
 __attribute__((noinline)) void runSerialCaptureUi() {
@@ -1130,16 +1167,32 @@ __attribute__((noinline)) void runSerialCaptureUi() {
         else {
             settings=requested;settings.rxTimeoutMs=30000;radio=prepared;profile=TxProfile::ReceiveOnly;powerIndex=0;
             snprintf(activePreset,sizeof(activePreset),"AM270");captureSavedPath[0]=0;
-            serialCaptureContext=true;serialCaptureCloseRequested=false;serialCaptureSavePending=false;
-            Serial.println("[Capture] OPEN friendly auto-RSSI RX-only freq=433920000 limit=30000ms; no TX");
+            serialCaptureContext=true;serialCaptureHistoryContext=!trace;serialCaptureCloseRequested=false;serialCaptureSavePending=serialCapturePlayPending=false;
+            Serial.printf("[Capture] OPEN friendly auto-RSSI RX-only freq=433920000 %s; no TX\n",trace?"limit=30000ms":"limit=continuous cap=4");
             if(trace)Serial.println("[Capture] trace=ON ring=4096 freeze=terminal-or-stop");
-            captureApp(false,true);
+            if(trace)captureApp(false,true);else captureHistoryApp();
             while(!labStop()){Serial.println("[Capture] waiting for radio stop");delay(10);}
-            serialCaptureContext=false;serialCaptureCloseRequested=false;serialCaptureSavePending=false;
+            serialCaptureContext=false;serialCaptureHistoryContext=false;serialCaptureCloseRequested=false;serialCaptureSavePending=serialCapturePlayPending=false;
         }
     }
     if(trace&&!labRawTraceEnable(false))Serial.println("[Capture] ERROR trace freeze");
     restoreReceiveMode();
+}
+__attribute__((noinline)) void requestCaptureSave(const char* command) {
+    if(!serialCaptureContext||serialCaptureCloseRequested||serialCaptureSavePending||serialCapturePlayPending){Serial.println("[Capture] ERROR save requires an open capture UI");return;}
+    size_t selected=captureHistorySelection;
+    if(strcmp(command,"capturesave")) {
+        if(strncmp(command,"capturesave ",12)){Serial.println("[Capture] ERROR use capturesave or capturesave 1..4");return;}
+        const char* digit=command+12;
+        if(!serialCaptureHistoryContext||digit[0]<'1'||digit[0]>'4'||digit[1]){Serial.println("[Capture] ERROR use capturesave or capturesave 1..4");return;}
+        selected=size_t(digit[0]-'1');
+    }
+    if(serialCaptureHistoryContext) {
+        const LabSnapshot state=labSnapshot();
+        if(selected>=4||selected>=state.captureHistoryCount||!state.captureHistory[selected].valid){Serial.println("[Capture] ERROR selected slot has no signal");return;}
+        captureHistorySelection=selected;
+    }
+    serialCaptureSavePending=true;Serial.println("[Capture] save request queued");
 }
 __attribute__((noinline)) void dumpCaptureTrace() {
     if(serialChatContext||(!serialCaptureContext&&!serialChatMainIdle())){Serial.println("[RAWTRACE] ERROR requires capture UI or idle main menu");return;}
@@ -1294,13 +1347,16 @@ void radioLabSerialPoll() {
             }
             else if(!strcmp(command,"capturetracedump"))dumpCaptureTrace();
             else if(!strcmp(command,"capturestat"))printCaptureStatus();
-            else if(!strcmp(command,"capturesave")) {
-                if(!serialCaptureContext||serialCaptureCloseRequested||serialCaptureSavePending)Serial.println("[Capture] ERROR save requires an open capture UI");
-                else {serialCaptureSavePending=true;Serial.println("[Capture] save request queued");}
+            else if(!strcmp(command,"capturesave")||!strncmp(command,"capturesave ",12))requestCaptureSave(command);
+            else if(!strcmp(command,"captureplay")) {
+                if(!serialCaptureContext||!serialCaptureHistoryContext||serialCaptureCloseRequested||serialCaptureSavePending||serialCapturePlayPending||captureHistorySelection>=4||
+                   !(captureHistorySavedMask&(1U<<captureHistorySelection))||captureHistorySavedPathSlot!=int8_t(captureHistorySelection)||!captureSavedPath[0])
+                    Serial.println("[Capture] PLAY ERROR select the last saved history slot");
+                else {serialCapturePlayPending=true;Serial.println("[Capture] play request queued; one manual saved-file send");}
             }
             else if(!strcmp(command,"captureclose")) {
                 if(!serialCaptureContext)Serial.println("[Capture] ERROR no capture UI is open");
-                else {serialCaptureCloseRequested=true;serialCaptureSavePending=false;labRequestStop();Serial.println("[Capture] close requested");}
+                else {serialCaptureCloseRequested=true;serialCaptureSavePending=serialCapturePlayPending=false;labRequestStop();Serial.println("[Capture] close requested");}
             }
             else if(!strcmp(command,"chatopen")) {
                 if(serialChatOpenPending || serialCaptureOpenPending || !serialChatMainIdle())
