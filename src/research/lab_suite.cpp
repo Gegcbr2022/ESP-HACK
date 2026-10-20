@@ -6,6 +6,7 @@
 #include "app_install.h"
 #include "lua_apps.h"
 #include "chat_profile.h"
+#include "../interface/ui_text.h"
 #include "../../shared/flipper_chat_compat.h"
 #include "../../shared/chat_session.h"
 #include "../subghz.h"
@@ -88,20 +89,24 @@ bool frame(bool force = false) {
     lastFrame = now; display.clearDisplay(); display.setTextSize(1);
     display.setTextColor(SH110X_WHITE); display.setTextWrap(false); return true;
 }
-void line(uint8_t row, const char* text) { display.setCursor(0, row * 9 + 2); display.print(text); }
+void line(uint8_t row, const char* text) { ui_text::draw(display, 0, row * 9 + 2, text); }
 void title(const char* text) {
     display.fillRect(0, 0, 128, 11, SH110X_WHITE);
-    display.setTextColor(SH110X_BLACK); display.setCursor(2, 2); display.print(text);
+    display.setTextColor(SH110X_BLACK); ui_text::draw(display, 2, 2, text, SH110X_BLACK);
     display.setTextColor(SH110X_WHITE);
 }
-void footer(const char* text) { display.drawFastHLine(0, 53, 128, SH110X_WHITE); display.setCursor(0, 56); display.print(text); }
+void footer(const char* text) { display.drawFastHLine(0, 53, 128, SH110X_WHITE); ui_text::draw(display, 0, 56, text); }
 void showNotice(const char* text) { snprintf(notice, sizeof(notice), "%s", text); Serial.printf("[RadioLab] %s\n", notice); }
 void message(const char* heading, const char* text) {
-    char rows[32][22]={};size_t row=0,column=0,offset=0;
-    for(const char* cursor=text;*cursor&&row<32;++cursor) {
-        if(*cursor=='\n'){++row;column=0;continue;}
-        if(column==21){++row;column=0;if(row==32)break;}
-        rows[row][column++]=*cursor;
+    char rows[32][43]={};size_t row=0,column=0,bytes=0,offset=0;
+    const size_t length=strlen(text);
+    for(size_t at=0;at<length&&row<32;) {
+        if(text[at]=='\n'){++row;column=bytes=0;++at;continue;}
+        if(column==21){++row;column=bytes=0;if(row==32)break;}
+        uint16_t codepoint;const size_t width=ui_text::decodeGlyph(text+at,length-at,codepoint);
+        if(width){memcpy(rows[row]+bytes,text+at,width);bytes+=width;at+=width;}
+        else{rows[row][bytes++]='?';++at;}
+        ++column;
     }
     const size_t total=row<32?row+1:32;
     resetInput();
@@ -111,8 +116,8 @@ void message(const char* heading, const char* text) {
         if(down&&offset+4<total)++offset;
         if(frame()) {
             title(heading);
-            for(size_t i=0;i<4&&offset+i<total;++i){display.setCursor(0,15+i*8);display.print(rows[offset+i]);}
-            footer("UP/DN scroll OK/BACK"); display.display();
+            for(size_t i=0;i<4&&offset+i<total;++i)ui_text::draw(display,0,15+i*8,rows[offset+i]);
+            footer("UP/DN лист OK/BACK"); display.display();
         }
     }
     resetInput();
@@ -134,7 +139,7 @@ bool textEntry(const char* heading, char* output, size_t capacity, const char* a
             title(heading); line(2, output + (n > 20 ? n - 20 : 0));
             char buf[40]; snprintf(buf, sizeof(buf), "UP/DOWN: [%c]  %u/%u", alphabet[key], unsigned(n), unsigned(capacity - 1)); line(4, buf);
             if((millis()/500)%2)display.drawFastHLine(60,46,6,SH110X_WHITE);
-            footer("hold OK done/BK cancel"); display.display();
+            footer("Держ.OK/BACK: да/нет"); display.display();
         }
     }
 }
@@ -234,23 +239,30 @@ void saveCapture() {
     else showNotice("SD save failed");
 }
 void captureApp(bool protocol) {
-    if(settings.packetFormat != PacketFormat::Async) { message("Read RAW", "Select an asynchronous preset first."); return; }
+    if(settings.packetFormat != PacketFormat::Async) { message("Приём RAW", "Выберите сигнал AM/FM\nв настройках приёма."); return; }
     if(!startMode(LabMode::Raw)) return;
     resetInput();
     while(true) {
         input(); if(back || holdBack) break;
-        if(ok) { saveCapture(); message("Capture result", notice); break; }
+        if(ok) {
+            saveCapture();const char* result=notice;
+            if(!strcmp(notice,"No complete RSSI-triggered burst"))result="Нет целого сигнала.\nНажмите кнопку пульта\nи дождитесь приёма.";
+            else if(!strcmp(notice,"Damaged/full capture: not saved"))result="Запись повреждена.\nПовторите приём.";
+            else if(!strcmp(notice,"SD save failed"))result="Ошибка записи на SD.";
+            else if(!strcmp(notice,"Radio still active"))result="Радио останавливается";
+            message("Результат приёма",result);break;
+        }
         if(frame()) {
-            const LabSnapshot s = labSnapshot(); title(protocol ? "Protocol Read" : "Read RAW");
-            char b[48]; snprintf(b, sizeof(b), "%lu.%03lu %s %ddBm", (unsigned long)(settings.frequencyHz/1000000),
+            const LabSnapshot s = labSnapshot(); title(protocol ? "Протокол LAB" : "Принять сигнал");
+            char b[48]; snprintf(b, sizeof(b), "%lu.%03lu %s %dдБм", (unsigned long)(settings.frequencyHz/1000000),
                     (unsigned long)((settings.frequencyHz/1000)%1000), activePreset, s.rssiDbm); line(2, b);
-            snprintf(b, sizeof(b), "%lu pulses drop%lu", (unsigned long)s.pulseCount, (unsigned long)s.dropped); line(3, b);
+            snprintf(b, sizeof(b), "Имп.%lu потерь%lu", (unsigned long)s.pulseCount, (unsigned long)s.dropped); line(3, b);
             if(protocol) {
                 const size_t n = labCopyPulses(waveform, kWaveformCapacity); DecodedSignal decoded;
                 if(decodeLabOok(waveform, n, decoded)) { snprintf(b, sizeof(b), "LAB-OOK24: %04lX CRC OK", (unsigned long)decoded.payload); line(4, b); }
-                else line(4, "Listening LAB-OOK24");
-            } else line(4,s.captureComplete?"Burst complete: OK save":s.captureTriggered?"Capturing burst":"Waiting RSSI threshold");
-            footer("OK stop+save  BACK exit"); display.display();
+                else line(4, "Ожидание LAB-OOK24");
+            } else line(4,s.captureComplete?"Принято: OK записать":s.captureTriggered?"Запись сигнала...":"Ждём кнопку пульта");
+            footer("OK:запись BACK:выход"); display.display();
         }
     }
     labStop(); resetInput();
@@ -526,28 +538,43 @@ void diagnosticsApp() {
 struct History {uint16_t peer;bool sent;char text[161];};
 History history[8];size_t historySize,historyNext;
 void addHistory(uint16_t peer,bool sent,const char* text){History& h=history[historyNext];h.peer=peer;h.sent=sent;snprintf(h.text,sizeof(h.text),"%s",text);historyNext=(historyNext+1)%8;if(historySize<8)++historySize;}
+const char* chatBlockText(const LabSnapshot& s) {
+    if(!strcmp(s.txBlockReason,"Carrier busy"))return "Эфир занят: ждём";
+    if(!strcmp(s.txBlockReason,"60s airtime budget"))return "Лимит эфира: ждём";
+    if(!strcmp(s.txBlockReason,"100ms packet gap"))return "Пауза между пакетами";
+    if(!strcmp(s.txBlockReason,"Ready: manual send"))return "Можно отправлять";
+    if(!strncmp(s.txBlockReason,"TX off",6))return "Передача выключена";
+    return "Сбой отправки";
+}
+const char* chatStoppedText(const LabSnapshot& s) {
+    if(!strcmp(s.status,"CC1101 not detected"))return "CC1101 не найден";
+    if(!strcmp(s.status,"Register readback mismatch"))return "Сбой настроек радио";
+    if(!strcmp(s.status,"Radio state timeout"))return "Радио не отвечает";
+    if(!strcmp(s.status,"No RAM for worker"))return "Не хватает памяти";
+    return "Радио остановлено";
+}
 void readHistory(){
     size_t selected=0,offset=0;resetInput();
     while(true){input();if(back||holdBack)break;if(up&&selected) {--selected;offset=0;}if(down&&selected+1<historySize){++selected;offset=0;}if(ok&&historySize){const History& h=history[(historyNext+8-1-selected)%8];offset=offset+60<strlen(h.text)?offset+60:0;}
-        if(frame()){title("Chat history");if(historySize){const History& h=history[(historyNext+8-1-selected)%8];char b[32];if(h.peer)snprintf(b,sizeof(b),"%s %04X (%u/%u)",h.sent?"To":"From",h.peer,unsigned(selected+1),unsigned(historySize));else snprintf(b,sizeof(b),"Broadcast %s (%u/%u)",h.sent?"TX":"RX",unsigned(selected+1),unsigned(historySize));line(2,b);for(size_t row=0;row<3;++row){size_t pos=offset+row*20;if(pos<strlen(h.text)){snprintf(b,21,"%.20s",h.text+pos);display.setCursor(0,28+row*8);display.print(b);}}}else line(3,"No messages yet");footer("UP/DN item OK page BK");display.display();}}
+        if(frame()){title("История чата");if(historySize){const History& h=history[(historyNext+8-1-selected)%8];char b[48];if(h.peer)snprintf(b,sizeof(b),"%s %04X (%u/%u)",h.sent?"Кому":"От",h.peer,unsigned(selected+1),unsigned(historySize));else snprintf(b,sizeof(b),"%s (%u/%u)",h.sent?"Отправлено":"Принято",unsigned(selected+1),unsigned(historySize));line(2,b);for(size_t row=0;row<3;++row){size_t pos=offset+row*20;if(pos<strlen(h.text)){snprintf(b,21,"%.20s",h.text+pos);display.setCursor(0,28+row*8);display.print(b);}}}else line(3,"Сообщений пока нет");footer("UP/DN OK:лист BACK");display.display();}}
     resetInput();
 }
 void chatAdvanced(uint16_t& recipient){
-    size_t selected=0;static const char* items[]={"Inbox / sent history","Compose message","Discover devices","Select recipient","Delivery status","Mode: ESP ACK"};resetInput();
+    size_t selected=0;static const char* items[]={"История сообщений","Написать текст","Поиск устройств","Получатель","Статус отправки","Режим: ESP ACK"};resetInput();
     while(true){
         input();uint16_t source;char received[161];while(labReceiveMessage(source,received,sizeof(received)))addHistory(source,false,received);
         const bool plaintext=chatFormat==ChatMode::FlipperPlaintext;
         if(back||holdBack)break;if(up)selected=(selected+5)%6;if(down)selected=(selected+1)%6;
         if(ok){
             if(selected==0)readHistory();
-            if(selected==1){char text[161]="";if(textEntry("Compose ASCII",text,sizeof(text))){LabSnapshot s=labSnapshot();uint16_t to=plaintext?0:(recipient?recipient:s.peer);if(labQueueText(text,to)){addHistory(to,true,text);showNotice(plaintext?"Queued broadcast; no ACK":"Queued");}else showNotice("Queue full or TX off");}}
+            if(selected==1){char text[161]="";if(textEntry("Текст (ASCII)",text,sizeof(text))){LabSnapshot s=labSnapshot();uint16_t to=plaintext?0:(recipient?recipient:s.peer);if(labQueueText(text,to)){addHistory(to,true,text);showNotice(plaintext?"Queued broadcast; no ACK":"Queued");}else showNotice("Queue full or TX off");}}
             if(selected==2){if(!labDiscover())showNotice("TX off or command queue full");else showNotice(plaintext?"Presence queued; no ACK":"Discovery queued");}
-            if(selected==3){if(plaintext)message("Flipper plaintext","Broadcast to all listeners. Select No encryption in Enhanced Sub-GHz Chat and use the same frequency. No peer IDs or acknowledgements.");else{LabSnapshot s=labSnapshot();size_t index=0;for(size_t i=0;i<8;++i)if(s.peers[i]==recipient)index=i+1;recipient=s.peers[index%8];}}
-            if(selected==4){LabSnapshot s=labSnapshot();char b[190];if(plaintext)snprintf(b,sizeof(b),"State %u: 0idle 1queued\n2sending 3sent 4failed\nSent means local RF only.\nNo acknowledgement.\nRX%lu TX%lu\nRejected%lu truncated%lu",s.delivery,(unsigned long)s.receivedMessages,(unsigned long)s.sentMessages,(unsigned long)s.plaintextRejected,(unsigned long)s.plaintextTruncated);else snprintf(b,sizeof(b),"Delivery %u\n0idle 1queued 2sending\n3delivered 4failed\nRX%lu TX%lu attempt%lu",s.delivery,(unsigned long)s.receivedMessages,(unsigned long)s.sentMessages,(unsigned long)s.chatRetries);message("Delivery",b);}
+            if(selected==3){if(plaintext)message("Связь с Flipper","Flipper: без шифр.\nЧастота 433.920 МГц.\nСообщение всем.\nПодтверждения нет.");else{LabSnapshot s=labSnapshot();size_t index=0;for(size_t i=0;i<8;++i)if(s.peers[i]==recipient)index=i+1;recipient=s.peers[index%8];}}
+            if(selected==4){LabSnapshot s=labSnapshot();char b[256];if(plaintext)snprintf(b,sizeof(b),"Статус %u\n0покой 1очередь\n2передача 3ушло\n4ошибка\nПриём не подтверждён.\nRX%lu TX%lu\nОтброшено %lu\nОбрезано %lu",s.delivery,(unsigned long)s.receivedMessages,(unsigned long)s.sentMessages,(unsigned long)s.plaintextRejected,(unsigned long)s.plaintextTruncated);else snprintf(b,sizeof(b),"Статус %u\n0покой 1очередь\n2передача 3дошло\n4ошибка\nRX%lu TX%lu попыток%lu",s.delivery,(unsigned long)s.receivedMessages,(unsigned long)s.sentMessages,(unsigned long)s.chatRetries);message("Отправка",b);}
             if(selected==5){if(!labStop()){showNotice("Radio still stopping");continue;}chatFormat=plaintext?ChatMode::EspAck:ChatMode::FlipperPlaintext;recipient=0;historySize=historyNext=0;if(!startMode(LabMode::Chat))break;showNotice(chatFormat==ChatMode::FlipperPlaintext?"Flipper plaintext; encryption off":"ESP ACK protocol");}
             resetInput();
         }
-        if(frame()){LabSnapshot s=labSnapshot();const bool plain=chatFormat==ChatMode::FlipperPlaintext;title(plain?"Flipper plaintext":"Sub-GHz Chat / ACK");char b[48];snprintf(b,sizeof(b),"%s %lu.%03lu %ddB",s.active&&s.connected?"RX":"OFF",(unsigned long)(s.frequencyHz/1000000),(unsigned long)((s.frequencyHz/1000)%1000),s.rssiDbm);display.setCursor(0,13);display.print(b);display.setCursor(0,23);display.print(selected==5?(plain?"Mode: Flipper plain":"Mode: ESP ACK"):selected==2&&plain?"Send presence":selected==3&&plain?"Compatibility info":items[selected]);snprintf(b,sizeof(b),"P%lu C%lu F%lu M%lu",(unsigned long)s.packets,(unsigned long)s.crcErrors,(unsigned long)s.fifoErrors,(unsigned long)s.receivedMessages);display.setCursor(0,33);display.print(b);display.setCursor(0,43);display.print(s.txBlockReason);footer("UP/DN item OK open BK");display.display();}
+        if(frame()){LabSnapshot s=labSnapshot();const bool plain=chatFormat==ChatMode::FlipperPlaintext;title(plain?"Чат Flipper":"Чат / ESP ACK");char b[48];snprintf(b,sizeof(b),"%s %lu.%03lu %ddB",s.active&&s.connected?"RX":"Выкл",(unsigned long)(s.frequencyHz/1000000),(unsigned long)((s.frequencyHz/1000)%1000),s.rssiDbm);ui_text::draw(display,0,13,b);ui_text::draw(display,0,23,selected==5?(plain?"Режим: Flipper":"Режим: ESP ACK"):selected==2&&plain?"Отправить маяк":selected==3&&plain?"О совместимости":items[selected]);snprintf(b,sizeof(b),"P%lu C%lu F%lu M%lu",(unsigned long)s.packets,(unsigned long)s.crcErrors,(unsigned long)s.fifoErrors,(unsigned long)s.receivedMessages);ui_text::draw(display,0,33,b);ui_text::draw(display,0,43,s.txBlockReason);footer("UP/DN OK:вход BACK");display.display();}
     }
     resetInput();
 }
@@ -558,7 +585,8 @@ bool simpleChatSend(uint16_t recipient,const char* text) {
     addHistory(destination,true,text);return true;
 }
 int chatSendMenu(uint16_t& recipient) {
-    static const char* choices[]={"Write message","Hello","TEST123","OK","Advanced"};
+    static const char* choices[]={"Написать текст","Привет (Hello)","Тест TEST123","Ответ OK","Дополнительно"};
+    static const char* wireText[]={"","Hello","TEST123","OK",""};
     size_t selected=2;resetInput();
     while(true) {
         input();if(back||holdBack)break;
@@ -566,8 +594,8 @@ int chatSendMenu(uint16_t& recipient) {
         if(ok) {
             if(selected==4){chatAdvanced(recipient);break;}
             char text[161]="";
-            if(selected==0){if(!textEntry("Write message",text,sizeof(text))){resetInput();continue;}}
-            else snprintf(text,sizeof(text),"%s",choices[selected]);
+            if(selected==0){if(!textEntry("Текст (ASCII)",text,sizeof(text))){resetInput();continue;}}
+            else snprintf(text,sizeof(text),"%s",wireText[selected]);
             if(text[0]) {
                 const bool queued=simpleChatSend(recipient,text);
                 showNotice(queued?"Message queued":"Message not queued: radio busy/off");
@@ -575,9 +603,9 @@ int chatSendMenu(uint16_t& recipient) {
             }
         }
         if(frame()) {
-            title("Send message");
-            for(size_t row=0;row<4;++row){display.setCursor(0,15+row*9);display.print(row?"  ":"> ");display.print(choices[(selected+row)%5]);}
-            footer("UP/DN OK send BK back");display.display();
+            title("Отправить");
+            for(size_t row=0;row<4;++row){display.setCursor(0,15+row*9);display.print(row?"  ":"> ");ui_text::print(display,choices[(selected+row)%5]);}
+            footer("OK:послать BACK:назад");display.display();
         }
     }
     resetInput();return false;
@@ -587,7 +615,7 @@ void chatApp(){
     const TxProfile savedProfile=profile;const uint8_t savedPower=powerIndex;const ChatMode savedMode=chatFormat;
     RegisterImage automatic;
     RadioSettings automaticSettings;
-    if(!makeFlipperChatProfile(automatic,automaticSettings)){message("Chat unavailable","Cannot apply chat radio profile.");return;}
+    if(!makeFlipperChatProfile(automatic,automaticSettings)){message("Чат недоступен","Ошибка профиля радио.");return;}
     settings=automaticSettings;radio=automatic;profile=TxProfile::ShieldedLab;powerIndex=1;chatFormat=ChatMode::FlipperPlaintext;
     const bool started=startMode(LabMode::Chat);
     if(started) {
@@ -606,21 +634,21 @@ void chatApp(){
             if(ok){const int result=chatSendMenu(recipient);if(result<0)queueError=true;else if(result>0){selected=offset=0;queueError=false;}if(selected>=historySize)selected=offset=0;resetInput();}
             if(frame()) {
                 const LabSnapshot s=labSnapshot();
-                const char* phase=!s.active?"Stopped":!s.connected?"RF ERR":queueError?"Busy":s.delivery==ChatQueued||s.delivery==ChatSending?"Sending":s.delivery==ChatFailed?"Failed":s.delivery==ChatDelivered?"Sent":"Ready";
-                title("CHAT 433.92");display.setCursor(82,2);display.setTextColor(SH110X_BLACK);display.print(phase);display.setTextColor(SH110X_WHITE);
+                const char* phase=!s.active?"Стоп":!s.connected?"РФсбой":queueError?"Занят":s.delivery==ChatQueued||s.delivery==ChatSending?"Отпр.":s.delivery==ChatFailed?"Ошибка":s.delivery==ChatDelivered?"Послано":"Готов";
+                title("ЧАТ");ui_text::draw(display,82,2,phase,SH110X_BLACK,7);display.setTextColor(SH110X_WHITE);
                 if(historySize) {
                     const History& h=history[(historyNext+8-1-selected)%8];
                     for(size_t row=0;row<5;++row){const size_t position=offset+row*20;if(position>=strlen(h.text))break;char text[21];snprintf(text,sizeof(text),"%.20s",h.text+position);display.setCursor(0,13+row*8);display.print(text);}
-                    display.setCursor(0,56);display.print(h.sent?"You ":"Flipper ");display.print(selected+1);display.print('/');display.print(historySize);display.print(" OK send");
+                    char hint[48];snprintf(hint,sizeof(hint),"%s %u/%u OK: текст",h.sent?"Вы":"Flipper",unsigned(selected+1),unsigned(historySize));ui_text::draw(display,0,56,hint);
                     display.drawFastHLine(0,53,128,SH110X_WHITE);
                 } else {
-                    display.setCursor(0,15);display.print(s.active&&s.connected?"Ready for Flipper":"Starting radio...");display.setCursor(0,27);display.print("Use No encryption");display.setCursor(0,39);display.print("OK to send TEST123");footer("UP/DN read OK send BK");
+                    ui_text::draw(display,0,15,"433.920 МГц");ui_text::draw(display,0,27,"Flipper: без шифр.");ui_text::draw(display,0,39,"OK: отправка TEST123");footer("UP/DN лист BACK выход");
                 }
                 if((s.delivery==ChatQueued||s.delivery==ChatSending)&&strcmp(s.txBlockReason,"Ready: manual send")&&strcmp(s.txBlockReason,"100ms packet gap")) {
-                    display.fillRect(0,43,128,10,SH110X_BLACK);display.setCursor(0,44);display.print(s.txBlockReason);
+                    display.fillRect(0,43,128,10,SH110X_BLACK);ui_text::draw(display,0,44,chatBlockText(s));
                 } else if(queueError||!s.active||!s.connected||s.delivery==ChatFailed) {
-                    display.fillRect(0,43,128,10,SH110X_BLACK);display.setCursor(0,44);
-                    display.print(queueError?"Not queued; retry":!s.active?s.status:!s.connected?"Radio not detected":strcmp(s.txBlockReason,"Ready: manual send")?s.txBlockReason:"Radio TX failed");
+                    display.fillRect(0,43,128,10,SH110X_BLACK);
+                    ui_text::draw(display,0,44,queueError?"Не отправлено: занят":!s.active?chatStoppedText(s):!s.connected?"CC1101 не найден":strcmp(s.txBlockReason,"Ready: manual send")?chatBlockText(s):"Сбой отправки");
                 }
                 display.display();
             }
@@ -629,6 +657,41 @@ void chatApp(){
         serialChatContext=false;serialChatCloseRequested=false;resetInput();
     }
     settings=savedSettings;radio=savedRadio;profile=savedProfile;powerIndex=savedPower;chatFormat=savedMode;
+}
+
+void simpleRadioSettings() {
+    static const char* presets[]={"AM/OOK 270 кГц","AM/OOK 650 кГц","FM 2.38 кГц","FM 47.6 кГц","FM 12.7 кГц"};
+    size_t selected=0,preset=0;
+    for(size_t i=0;i<presetCount();++i)if(!strcmp(activePreset,presetAt(i)->name))preset=i;
+    resetInput();
+    while(true) {
+        input();if(back||holdBack)break;if(up||down)selected=1-selected;
+        if(ok) {
+            if(selected==0)settings.frequencyHz=settings.frequencyHz==433920000?868350000:433920000;
+            else {preset=(preset+1)%presetCount();if(!selectPreset(preset))message("Настройки","Ошибка профиля радио.");}
+        }
+        if(frame()) {
+            title("Настройки приёма");
+            ui_text::draw(display,0,14,selected==0?"> Частота":"  Частота");
+            char frequencyText[40];snprintf(frequencyText,sizeof(frequencyText),"%lu.%03lu МГц",(unsigned long)(settings.frequencyHz/1000000),(unsigned long)((settings.frequencyHz/1000)%1000));
+            ui_text::draw(display,12,23,frequencyText);
+            ui_text::draw(display,0,34,selected==1?"> Сигнал":"  Сигнал");
+            ui_text::draw(display,12,43,preset<5?presets[preset]:activePreset,SH110X_WHITE,19);
+            footer("OK:смена BACK:назад");display.display();
+        }
+    }
+    resetInput();
+}
+
+void radioLabAdvanced() {
+    static const char* apps[]={"Приём протокола LAB","Запись RAW","Поиск частоты","Анализ спектра","Анализ RAW","Анализ протокола","Файлы сигналов","Генератор сигналов","Все настройки радио","Поиск модуляции","Чат с Flipper","Музыкальная лаб.","Диагностика CC1101","О программе"};
+    const size_t count=sizeof(apps)/sizeof(apps[0]);size_t selected=0;resetInput();
+    while(true) {
+        input();if(back||holdBack)break;if(up)selected=(selected+count-1)%count;if(down)selected=(selected+1)%count;
+        if(ok){switch(selected){case 0:captureApp(true);break;case 1:captureApp(false);break;case 2:monitorApp(false);break;case 3:monitorApp(true);break;case 4:analyzerApp(false);break;case 5:analyzerApp(true);break;case 6:browser();break;case 7:generatorApp();break;case 8:settingsApp();break;case 9:explorerApp();break;case 10:chatApp();break;case 11:browser(true);break;case 12:diagnosticsApp();break;case 13:message("О радиолаборатории","ESP32 + CC1101\nRAW: один сигнал.\nCC1101 не SDR.\nПоддержка протоколов\nограничена.");break;}resetInput();}
+        if(frame()){title("Дополнительно");for(size_t row=0;row<4;++row){const size_t i=(selected+row)%count;display.setCursor(0,17+row*9);display.print(row?"  ":"> ");ui_text::print(display,apps[i]);}footer("UP/DN выбор OK:вход");display.display();}
+    }
+    resetInput();
 }
 }
 
@@ -648,12 +711,12 @@ void runRadioLab() {
     suspendLegacyReceive();
     settings=RadioSettings();settings.rxTimeoutMs=30000;selectPreset(0);profile=TxProfile::ReceiveOnly;powerIndex=0;chatFormat=ChatMode::FlipperPlaintext;
     SD.mkdir("/subghz");SD.mkdir("/subghz/presets");
-    static const char* apps[]={"Read laboratory","Read RAW","Frequency Analyzer","Spectrum Analyzer","RAW Signal Analyzer","Protocol Analyzer","Signal Manager","Signal Generator","Radio Settings","Modulation Explorer","Sub-GHz Chat","Music Lab","CC1101 Diagnostics","About"};
+    static const char* apps[]={"Принять сигнал","Файлы .sub","Чат Flipper","Настройки","Дополнительно"};
     const size_t count=sizeof(apps)/sizeof(apps[0]);size_t selected=0;resetInput();
     while(true){
         input();if(back||holdBack)break;if(up)selected=(selected+count-1)%count;if(down)selected=(selected+1)%count;
-        if(ok){switch(selected){case 0:captureApp(true);break;case 1:captureApp(false);break;case 2:monitorApp(false);break;case 3:monitorApp(true);break;case 4:analyzerApp(false);break;case 5:analyzerApp(true);break;case 6:browser();break;case 7:generatorApp();break;case 8:settingsApp();break;case 9:explorerApp();break;case 10:chatApp();break;case 11:browser(true);break;case 12:diagnosticsApp();break;case 13:message("ESP-HACK Radio Lab","ESP32 + CC1101\nSH1106 / 4 buttons\n26MHz crystal assumed\nHardware validation pending\nCC1101 is not an SDR");break;}resetInput();}
-        if(frame()){title("Sub-GHz / Radio Lab");for(size_t row=0;row<4;++row){size_t i=(selected+row)%count;display.setCursor(0,17+row*9);display.print(row?"  ":"> ");display.print(apps[i]);}footer("UP/DN select OK open");display.display();}
+        if(ok){switch(selected){case 0:if(settings.packetFormat!=PacketFormat::Async)selectPreset(0);captureApp(false);break;case 1:browser();break;case 2:chatApp();break;case 3:simpleRadioSettings();break;case 4:radioLabAdvanced();break;}resetInput();}
+        if(frame()){char heading[40];snprintf(heading,sizeof(heading),"Радио %lu.%03lu",(unsigned long)(settings.frequencyHz/1000000),(unsigned long)((settings.frequencyHz/1000)%1000));title(heading);for(size_t row=0;row<4;++row){size_t i=(selected+row)%count;display.setCursor(0,17+row*9);display.print(row?"  ":"> ");ui_text::print(display,apps[i]);}footer("UP/DN выбор OK:вход");display.display();}
     }
     // Ownership cannot pass back to legacy code until the worker has stopped.
     while(!labStop()) { showNotice("Waiting for radio worker to stop"); delay(10); }
