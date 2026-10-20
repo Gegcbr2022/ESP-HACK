@@ -19,6 +19,7 @@ jobs:
       - run: python tests/portable/run_formats_tests.py --compiler g++
       - run: python tests/portable/run_lab_tests.py --compiler g++
       - run: python tests/portable/run_chat_profile_tests.py --compiler g++
+      - run: python tests/portable/run_static_sub_tests.py --compiler g++
       - run: python tests/portable/run_legacy_tests.py --compiler g++
       - run: python tests/portable/run_app_catalog_tests.py --compiler g++
       - run: python tests/pocket_menu/run.py --compiler g++
