@@ -6,4 +6,6 @@ void runRadioLabFile(const char* path);
 bool radioLabPermitTx(uint32_t frequencyHz, uint32_t durationMs);
 void radioLabBootDiagnostics();
 void radioLabSerialPoll();
+// Main loop only: call after radioLabSerialPoll() returns, never from chat input.
+void radioLabHandlePending();
 void ensureRadioLabFixture();

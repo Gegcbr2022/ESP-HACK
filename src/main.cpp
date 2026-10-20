@@ -676,7 +676,10 @@ void setup() {
 }
 
 void loop() {
-  if(inMenu)radioLabSerialPoll();
+  if(inMenu) {
+    radioLabSerialPoll();
+    radioLabHandlePending();
+  }
   static MenuButtonState upHeld;
   static MenuButtonState downHeld;
   buttonUp.tick();
