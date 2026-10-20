@@ -20,8 +20,15 @@ logs are retained locally and are excluded from the public fork and release.
 
 ## Final SDK build
 
-Final firmware installation and on-device Lua results are recorded in the
-release test report after the final target build and device run.
+The final Lua SDK image was written and all four segments passed explicit
+esptool verification. Its application image is 1,655,824 bytes, SHA256
+`1b8b5a8656efc1fc23511d34b886273c7ddbf2a76434bf6ade395db30cab9799`.
+After reset, the receive-only probe passed again with CC1101 VERSION=14,
+MARCSTATE=0D and zero ready timeouts. SD mounted and UI initialization reported
+121,928 free heap bytes. The user confirmed that the OLED menu and buttons work.
+
+On-device Lua sample installation and execution are recorded separately below
+when UART communication and the sample checks have completed.
 
 ## Physical checks still needed
 

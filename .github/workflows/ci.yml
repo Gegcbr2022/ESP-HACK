@@ -22,6 +22,7 @@ jobs:
       - run: python tests/raw_capture_mock/run.py --cxx g++
       - run: python tests/triggered_capture/run_triggered_tests.py --compiler g++
       - run: python tests/lua_sandbox/run.py --compiler gcc
+      - run: python tests/app_install_mock/run.py --cxx g++
       - run: python -m unittest discover -s tests/host -v
   esp32:
     runs-on: ubuntu-24.04

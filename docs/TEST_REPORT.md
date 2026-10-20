@@ -87,10 +87,15 @@ saved host file also has a SHA256 receipt. An interrupted second host transfer
 is not counted as a second successful independent dump. Private receipt/logs
 are retained separately from source/release code.
 
-Final ESP32 flash/readback, boot and device Lua self-test results require the
-release owner's final update after the newest build. Physical SD app upload,
-OLED/button observation, RF dashboard behavior, Flipper launch, cross-device
-chat, known-waveform reception, pulse jitter and calibrated RF/power tests
-remain pending unless explicitly supported by later device evidence. Follow
-`HARDWARE_VALIDATION.md`; do not infer these outcomes from host tests or SPI
-register access.
+The final SDK image was written to the attached ESP32 and all four segments
+passed explicit esptool verification. The boot probe reported PART=00 /
+VERSION=14, MARCSTATE=0D, zero SPI errors/ready timeouts, SD mounted and SH1106 UI
+ready with 121,928 free heap bytes. The user confirmed that the OLED menu and
+buttons work. The final application SHA256 is
+`1b8b5a8656efc1fc23511d34b886273c7ddbf2a76434bf6ade395db30cab9799`.
+
+Physical SD app upload and on-device Lua execution remain pending UART test
+completion. RF dashboard behavior, physical Flipper launch, cross-device chat,
+known-waveform reception, pulse jitter and calibrated RF/power tests also remain
+pending. Follow `HARDWARE_VALIDATION.md`; do not infer these outcomes from host
+tests or SPI register access.
