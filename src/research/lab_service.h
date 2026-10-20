@@ -28,6 +28,7 @@ struct LabSnapshot {
 bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& settings,
               TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz = 25000);
 bool labStop();
+void labRequestStop();
 LabSnapshot labSnapshot();
 bool labQueueText(const char* text, uint16_t destination = 0);
 bool labDiscover();

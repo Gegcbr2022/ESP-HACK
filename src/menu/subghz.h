@@ -321,8 +321,8 @@ static const unsigned char PROGMEM image_ArrowDown_bits[] = {0xf8, 0x70, 0x20};
 
 
 
-#define SUBGHZ_MENU_ITEM_COUNT 6
-static const char* subghzMenuItems[] = {"Read", "Read RAW", "Send", "Analyzer", "Jammer", "Brute"};
+#define SUBGHZ_MENU_ITEM_COUNT 7
+static const char* subghzMenuItems[] = {"Read", "Read RAW", "Send", "Analyzer", "Jammer", "Brute", "Radio Lab"};
 
 inline void OLED_printSubGHzMenu(DisplayType &display, byte menuIndex, int previousIndex = -1) {
   displaySubmenu(display, subghzMenuItems, SUBGHZ_MENU_ITEM_COUNT, menuIndex, previousIndex);

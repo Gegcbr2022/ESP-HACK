@@ -436,6 +436,7 @@ bool labStop() {
     if(!(xEventGroupWaitBits(events, kDone, pdFALSE, pdTRUE, pdMS_TO_TICKS(2500)) & kDone)) return false;
     workerHandle = nullptr; return true;
 }
+void labRequestStop(){stopRequested=true;}
 LabSnapshot labSnapshot() {
     LabSnapshot result;
     portENTER_CRITICAL(&lock); result = state; portEXIT_CRITICAL(&lock);

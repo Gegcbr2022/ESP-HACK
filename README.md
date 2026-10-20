@@ -1,163 +1,59 @@
-# 📡 ESP-HACK FW — [Русский](./README-ru.md)
+# ESP-HACK Radio Lab
 
-![ESP-HACK_LOGO](others/Pictures/ESP-HACK.png)
+ESP32 DevKit V1 + CC1101 + SH1106 radio laboratory, with **Lua applications
+installed on SD without rebuilding the firmware**, a four-button interface,
+bounded RAW capture/playback and an official-SDK Flipper Zero chat companion.
 
-## 🚀 About ESP-HACK FW
+This public fork builds on [Teapot174/ESP-HACK](https://github.com/Teapot174/ESP-HACK).
+The original GPIO wiring and main applications are retained. The upstream
+README is preserved in [README_UPSTREAM.md](README_UPSTREAM.md).
 
-ESP-HACK is a powerful universal firmware for the ESP32, built for RF research and pentesting of radio frequencies, Bluetooth, infrared signals and GPIO integrations. 
-The project targets enthusiasts and pentesters who want to explore protocols and devices in Sub-GHz ranges and other wireless technologies.
+## What changed
 
-[For more information, please check our wiki :)](https://teapot174.github.io/)
+- Audited CC1101 reset/SPI/RX transitions; fixed GPIO contention, out-of-bounds
+  timing reads, stale decoded payload packing and polling-based RAW capture.
+- Exact official Flipper1.5.1 AM270/AM650/FM238/FM476/FM12K presets, validated
+  advanced settings and streaming `.sub` import/export with explicit errors.
+- Radio Lab: receive, frequency/spectrum/RAW/protocol analysis, file and preset
+  management, finite laboratory generator, Music Lab and detailed diagnostics.
+- ESP32 ↔ Flipper chat: shared2FSK profile,160 ASCII bytes, fragmentation,
+  discovery, CRCs, ACK/retry/backoff and duplicate suppression. Real FAP built
+  against official1.5.1/API88.2; chat is unencrypted.
+- SD Apps: bounded Lua scripts, drawing/input/time/RX APIs and example apps.
+  Apps are Lua source, not Flipper `.fap` binaries or arbitrary ESP32 native
+  code. Install by copying `/apps/*.lua` or the supplied USB UART uploader.
+- Pinned builds, native tests, explicit hardware validation procedures and
+  a device-identity/backup-gated flashing helper.
 
-> *The firmware is stable within its declared functionality, but some features are marked as "in development". Use the device according to the laws in your region.*
+## Use
 
----
+Main menu **SubGHz → Radio Lab** or **SD Apps**. See
+[the user guide](README_RF_LAB.md), [build/flashing instructions](docs/BUILD_AND_FLASH.md),
+[app SDK](docs/APPS_SDK.md), [chat protocol](docs/CHAT_PROTOCOL.md),
+[hardware validation](docs/HARDWARE_VALIDATION.md) and
+[feature status](docs/FEATURE_STATUS.md).
 
-### ⚠️ Disclaimer
+```powershell
+python -m pip install platformio==6.2.0
+python -m platformio run -e SH1106
+python scripts/install_app.py --port COM4 examples/lua_apps/hello.lua
+```
 
-This firmware is designed exclusively for research purposes and hardware testing.
-By using the firmware, you must comply with the laws of your region. The firmware creator is not responsible for your actions. Jammers are ILLEGAL.
+Use short paths on Windows; details are in the build guide. The target is the
+original ESP32/4MiB/SH1106 board. ESP32 GPIOs and absent IR/nRF hardware are
+documented, not guessed.
 
----
+## Validation boundaries
 
-## ⚡ Features
+The release includes actual ESP32/FAP binaries and portable/mock test results.
+Compilation, a successful device flash and a CC1101 register probe do not prove
+RF sensitivity, timing, spectral compliance or Flipper interoperability. The
+test report separates observed results from pending physical tests. New TX
+requires an explicit finite laboratory profile; frequency choices and PA table
+values are not a regional certification.
 
-### WiFi
+Unrelated upstream applications remain available; their hardware behavior is
+outside the new test coverage.
 
-- Deauth
-- Beacon Spam  
-- EvilPortal  
-- Wardriving
-- Packets
-
-### Bluetooth
-
-- Spam:
-IOS, Android, Samsung, Xiaomi, Windows.
-- BadBLE
-- Mouse
-
-### SubGHz
-
-- Read  
-- Send
-- RAW (Record/Send)
-- Analyzer
-- Bruteforce:
-Came, Nice, Ansonic, Holtek, Chamberlain
-- Jammer (ILLEGAL)
-
-### Infrared
-
-- Send  
-- Read  
-- TV-B-Gone
-- Universal Remote
-
-Copy the contents of sdcard.zip to the SD card to make Universal Remote work.
-
-### GPIO
-
-**iButton**
-- Read
-- Write
-- Emulate
-
-**NRF24**
-- Jammer (ILLEGAL)
-- Spectrum
-- Config
-
-**ST25R3916 (soon)**
-- Read
-- Write
-- Emulate
-- Config
-
-### Games
-- Snake
-- Bird
-- Ping Pong
-- Bricks
-- "Doom"
-
-### Settings
-- Interface:
-Display Color, Standby time, Menu view, Submenu view, Boot Logo.
-- Restart
-- Reset
-- Update from SD
-- About
-
-To create a custom logo, [convert the image to a bitmap](https://pixel.hjlabs.in/converter) and upload it as a .txt file to the /bootlogo folder on the SD card.
-
----
-
-### 📡 Supported SubGHz modulations
-(315MHz/433.92MHz/868Mhz/915Mhz)
-- Princeton  
-- RcSwitch  
-- Came
-- Nice 
-- Holtec
-- Ansonic
-- Chamberlain
-- Any other protocol with RAW mode
-
----
-
-## 🛠️ Building
-
-### 🔧 PCB
-
-![ESP-HACK_PCB](others/Pictures/PCB.png)
-Thanks Dripside!
-
-### 🔧 Required components
-
-| Component | Link |
-|-----------|--------|
-| ESP32-WROOM | [TAP](https://aliexpress.com/item/1005007817121199.html) |
-| CC1101 | [TAP](https://aliexpress.com/item/1005008544032996.html) |
-| Display SH1106 | [TAP](https://aliexpress.com/item/1005004464878029.html) |
-| SD Мodule | [TAP](https://aliexpress.com/item/32674518514.html) |
-| Buttons | [TAP](https://aliexpress.com/item/4000452176168.html) |
-| IR-TX, IR-RX | [TAP](https://aliexpress.com/item/1005007446501425.html) |
-
----
-
-### 🔌 Connection scheme
-![ESP-HACK_Scheme](others/Pictures/Scheme.png)
-
-| Module | Pin | Pin | Pin | Pin | Pin | Pin | Pin |
-|--------|-------|-------|-------|-------|-------|-------|-------|
-| **📺 Display** | VCC → 3V3 | GND → GND | SCL → G22 | SDA → G21 | - | - | - |
-| **🔘 Buttons** | UP → G27 | DOWN → G26 | OK → G33 | BACK → G32 | - | - | - |
-| **📡 CC1101** | 1 → GND | 2 → 3V3 | 3 → G4 | 4 → G5 | 5 → G18 | 6 → G23 | 7 → G19 |
-| **💡 IR** | IR-TX → G16 | IR-RX → G35 | - | - | - | - | - |
-| **🔌 GPIO** | A → G16 | B → G2 | C → G18 | D → G23 | E → G19 | F → G25 | - |
-| **💾 SD Card** | 3v3 → 3v3 | CS → G15 | MOSI → G13 | CLK → G14 | MISO → G17 | GND → GND | - |
-
----
-
-## Errors (ERROR:)
-
-During operation ESP-HACK may show the following errors:
-
-| Error code | ❌ Problem | 🛠️ Possible fix |
-|------------|-----------|------------------|
-| **0x000**  | SD-Card initialization failed | 🛠️ Format the SD card as **FAT32** or replace it.      |
-| **0x001**  | CC1101 initialization failed | 🛠️ Check wiring and module functionality.               |
-| **0x002**  | NRF24 initialization failed | 🛠️ Verify chosen pins/connections and reboot the device. |
-
----
-
-## 📸 Final result
-
-![ESP-HACK_Device](others/Pictures/Device.jpg)
-
----
-
-## ✉️ Feedback (Telegram)
-**Channel:** [**TeapotHub**](https://t.me/TeapotHub)
-**Author:** [**Teapot174**](https://t.me/teapot174)
+License: **AGPL-3.0**. Original Lua, Flipper preset and SmartRC license notices
+are preserved in their respective source directories.
