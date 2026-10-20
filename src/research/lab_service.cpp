@@ -491,16 +491,25 @@ bool retainRawCandidate(TriggeredCapture& trigger,uint32_t receiveStartedMs,bool
     raw_capture::stop();drainRaw(trigger,true);
     const auto final=raw_capture::snapshot();trigger.integrity(final.dropped,final.rejected);
     publishRaw(trigger,final);
-    bool accepted=false;
+    bool accepted=false,storageFull=false;int addResult=-1;
     if(trigger.complete()) {
         size_t index=0;
         const capture_history::CandidateStatus quality={true,trigger.full(),trigger.dropped(),trigger.rejected()};
         const auto result=rawHistory.add(capture,trigger.size(),activeSettings.frequencyHz,state.peakDbm,quality,&index);
+        addResult=int(result);
         if(result==capture_history::AddResult::Added) {
             rawHistoryImages[index]=activeImage;rawHistorySettings[index]=activeSettings;accepted=true;
         } else if(result==capture_history::AddResult::Duplicate) {++rawHistoryDuplicates;accepted=true;}
-        else if(result==capture_history::AddResult::Full) {publishCaptureHistory();status("History full: choose/save signals");return false;}
+        else if(result==capture_history::AddResult::Full)storageFull=true;
     }
+    // One bounded line only after IRQ stop, before counters reset on rearm.
+    // No waveform, decoded key or other received payload is logged.
+    Serial.printf("[CaptureDiag] c=%u full=%u n=%u post=%u q=%u drop=%lu rej=%lu strong=%u rssi=%d noise=%d gate=%d rc=%u rt=%lu add=%d ok=%u\r\n",
+        unsigned(trigger.complete()),unsigned(trigger.full()),unsigned(trigger.size()),unsigned(trigger.postTriggerPulses()),
+        unsigned(trigger.rssiQualified()),static_cast<unsigned long>(trigger.dropped()),static_cast<unsigned long>(trigger.rejected()),
+        unsigned(state.carrier),int(state.rssiDbm),int(state.rawNoiseDbm),int(activeSettings.rssiThresholdDbm),
+        unsigned(final.lastRejectedCause),static_cast<unsigned long>(final.lastRejectedUs),addResult,unsigned(accepted));
+    if(storageFull){publishCaptureHistory();status("History full: choose/save signals");return false;}
     if(!accepted)++rawHistoryDiscarded;
     historyCandidateStored=accepted;
     publishCaptureHistory();
