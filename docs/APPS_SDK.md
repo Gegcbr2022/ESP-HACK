@@ -145,7 +145,10 @@ debug interface, dynamic code loader, metatable access or application-visible
 protected-call API. `print` and `collectgarbage` are unavailable. The runtime
 also removes `string.dump`, `rep`, `find`, `match`, `gmatch`, and `gsub`.
 `string.format`, `string.sub`, math functions and ordinary small tables suffice
-for the included examples.
+for the included examples. Bulk table operations are limited to 1,024 elements:
+`insert`, `remove` and `sort` reject larger table lengths, while `move`, `unpack`
+and `concat` reject larger selected ranges (`concat` also checks table length).
+These guards include sparse tables whose length exceeds 32-bit integer range.
 
 Callbacks have a 100,000-instruction limit and a time check near 5 ms. The time
 check is cooperative through Lua hooks, not hard preemption inside a native C
@@ -168,12 +171,13 @@ host (Zig example):
 python tests/lua_sandbox/run.py --compiler <zig.exe>
 ```
 
-The checked host run passed 13,959 checks, including 4,500 sample frames,
+The checked host run passed 13,983 checks, including 4,500 sample frames,
 allocation/coalescing/canary checks, 25 VM reopen/close cycles, quota interruption,
-safe OOM handling, blocked APIs/bytecode and callback errors. Mocks also require
+safe OOM handling, blocked APIs/bytecode, safe nonstring callback errors, and
+bounded table operations including giant sparse lengths and overlapping moves. Mocks also require
 sample text/geometry to remain visible on 128×64 and permit only the example's
-named receive profile. Peak VM use on the 64-bit host was 25,512 bytes for hello,
-26,200 for stopwatch, and 48,592 of 49,152 bytes for the RF dashboard. These
+named receive profile. Peak VM use on the 64-bit host was 26,008 bytes for hello,
+26,376 for stopwatch, and 48,656 of 49,152 bytes for the RF dashboard. These
 figures are host results, not measured ESP32 heap usage or hardware executions.
 
 If a file is absent from the list, check the `/apps` directory, safe filename,

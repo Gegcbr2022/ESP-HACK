@@ -99,10 +99,19 @@ static bool vm_tests() {
     LuaSandbox vm(bank.bytes,sizeof bank.bytes,clock_us,&clock); CHECK(vm.open());
     CHECK(load(vm,"assert(io==nil and os==nil and package==nil and debug==nil and coroutine==nil);"
         "assert(load==nil and loadfile==nil and dofile==nil and pcall==nil and xpcall==nil);"
-        "assert(print==nil and collectgarbage==nil and getmetatable==nil and setmetatable==nil);"
+        "assert(print==nil and warn==nil and collectgarbage==nil and getmetatable==nil and setmetatable==nil);"
         "assert(string.dump==nil and string.rep==nil and string.find==nil and string.match==nil);"
         "assert(string.gmatch==nil and string.gsub==nil); app={} "));
     CHECK(vm.draw()); CHECK(vm.tick(33)); CHECK(vm.input("up","press"));
+    CHECK(load(vm,"a={1,2,3};b={};table.move(a,1,3,2,b);assert(b[2]==1 and b[3]==2 and b[4]==3);"
+        "table.move(a,1,2,2);assert(a[1]==1 and a[2]==1 and a[3]==2)"));
+    CHECK(!load(vm,"table.move({},1,2147483647,1,{})")); CHECK(strstr(vm.error(),"1024 elements"));
+    // A few hash keys force Lua's length search above 32 bits without exhausting the 48 KiB heap.
+    CHECK(!load(vm,"local t={1,1,1,1,1,1,1,1};t[9]=1;t[16]=1;t[17]=1;for i=5,35 do t[2^i]=1 end;"
+        "assert(#t>4294967295);table.insert(t,1,0)")); CHECK(strstr(vm.error(),"1024 elements"));
+    CHECK(!load(vm,"local t={1,1,1,1,1,1,1,1};t[9]=1;t[16]=1;t[17]=1;for i=5,35 do t[2^i]=1 end;"
+        "assert(#t>4294967295);table.remove(t,1)")); CHECK(strstr(vm.error(),"1024 elements"));
+    CHECK(!load(vm,"table.move({},math.mininteger,math.maxinteger,1,{})")); CHECK(strstr(vm.error(),"1024 elements"));
     CHECK(load(vm,"app={tick=function(dt) assert(dt==33) end,input=function(b,e) assert(b=='up' and e=='press') end}"));
     CHECK(vm.tick(33)); CHECK(vm.input("up","press"));
     CHECK(load(vm,"app={draw=function() error('draw-failure') end}")); CHECK(!vm.draw()); CHECK(strstr(vm.error(),"draw-failure"));

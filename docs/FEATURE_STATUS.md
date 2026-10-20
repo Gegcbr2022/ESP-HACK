@@ -28,7 +28,7 @@ in the release's device-operation report, not generalized to all features.
 | Sub-GHz Chat | Shared protocol,160 ASCII bytes,4fragments, ACK/retry/backoff/discovery/duplicates | C99/C++11 loss/duplicate/delay/reboot/wrap/bounds tests | Cross-device delivery and RF errors pending |
 | Flipper FAP | Official1.5.1, API88.2, public exports, independent radio task | Shared protocol tests; actual strict FAP import check | Physical Flipper launch/UI/RF pending |
 | New OLED lab UI | Lightweight lists, keyboard, scrollable metadata, release guards | State helpers tested; no OLED/input simulator | Actual legibility/button workflow pending |
-| SD Apps / Lua SDK | Bounded SD-hosted Lua apps, monochrome drawing/input/clock and receive-only radio bindings; three source examples | Actual Lua VM/sandbox: 13,959 host checks and 4,500 sample frames; quotas, OOM, API removal, UI bounds | SD install, OLED/input behavior and RF dashboard pending |
+| SD Apps / Lua SDK | Bounded SD-hosted Lua apps, monochrome drawing/input/clock and receive-only radio bindings; three source examples | Actual Lua VM/sandbox: 13,983 host checks and 4,500 sample frames; quotas, OOM, API removal, UI bounds | SD install, OLED/input behavior and RF dashboard pending |
 | Backup / flash utility | Full host read + independent esptool full-flash MD5 verification and saved-file SHA256; optional two-host-read mode; identity/segment gates | Host utility guards tested / reviewed as reported | Connected 4 MiB dump and independent verification succeeded; interrupted second host dump is not counted |
 
 ## Explicit incomplete items
