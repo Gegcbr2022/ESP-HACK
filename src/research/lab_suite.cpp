@@ -1108,7 +1108,7 @@ __attribute__((noinline)) void printCaptureStatus() {
         (unsigned long)s.dropped,(unsigned long)s.rejected,(unsigned long)s.captureTailDiscarded,(unsigned long)s.samples,
         (unsigned long)s.spiErrors,(unsigned long)s.misoTimeouts,(unsigned long)s.timeouts,s.status);
     if(captureSavedPath[0])Serial.printf("[Capture] saved=%s\n",captureSavedPath);
-    Serial.printf("[Capture] rearms=%lu short=%lu armingDropped=%lu armingRejected=%lu\n",(unsigned long)s.captureRearms,(unsigned long)s.captureShortDiscarded,(unsigned long)s.captureArmingDropped,(unsigned long)s.captureArmingRejected);
+    Serial.printf("[Capture] rearms=%lu short=%lu armingDropped=%lu armingRejected=%lu qualifiedPulses=%lu rssiQualified=%u\n",(unsigned long)s.captureRearms,(unsigned long)s.captureShortDiscarded,(unsigned long)s.captureArmingDropped,(unsigned long)s.captureArmingRejected,(unsigned long)s.captureQualifiedPulses,s.captureRssiQualified);
 }
 __attribute__((noinline)) void runSerialCaptureUi() {
     if(!labStop()){Serial.println("[Capture] ERROR previous radio worker did not stop");return;}
