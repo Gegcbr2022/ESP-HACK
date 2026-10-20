@@ -1,6 +1,11 @@
 #ifndef ESP_HACK_GAMES_EXTRA_TEST_INC
 #define ESP_HACK_GAMES_EXTRA_TEST_INC
 static bool extra_lua(LuaSandbox& vm,const char* source) {
+    // Fixture assertions compile additional chunks which are not part of an app.
+    // Release previous assertion chunks before compiling another: otherwise GC
+    // pacing/hash layout can make the 48 KiB bank fail on harness-only garbage.
+    // The separate 1,500-frame app runs use normal automatic GC throughout.
+    lua_gc(vm.state(),LUA_GCCOLLECT,0);
     const bool ok=load(vm,source);
     if(!ok) fprintf(stderr,"Game state fixture: %s\n",vm.error());
     CHECK(ok); CHECK(vm.instructions()<=LuaSandbox::kInstructions);
