@@ -184,6 +184,12 @@ Flipper receiver decoded **A53B53** and reported **four packets**. Before/after
 checks confirmed the tested **45 CC1101 registers**, PA table and prior RX/IDLE
 state were restored. No crash occurred.
 
+The 45-register comparison excludes **FSTEST (0x29)** and **AGCTEST (0x2B)**.
+These test registers are snapshot-only: the guard neither writes them nor
+requires identical readback, because writes are prohibited and AGCTEST can
+change during RX. The other 45 configuration bytes are restored and checked
+strictly; PA-table and stable RX/IDLE checks are separate.
+
 The visible workflow selects with UP/DOWN and saves the selected entry with OK.
 It listens until four slots fill, a save pauses reception, or the user exits.
 Other entries remain available after saving. A new listening session requires

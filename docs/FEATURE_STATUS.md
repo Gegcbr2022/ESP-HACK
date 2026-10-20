@@ -1,11 +1,21 @@
 # Feature status and known limits
 
-This records **v1.3-rf-lab.2** for the specified ESP32/SH1106 board. “Built”
+This records **v1.3-rf-lab.3** for the specified ESP32/SH1106 board. “Built”
 means a real target binary linked, not merely a source syntax check. Native
 tests exercise portable logic or explicit GPIO/SPI mocks. Neither implies RF
 verification. Connected-device backup/flash/boot evidence is recorded separately
 in the release's device-operation report, not generalized to all features.
-Release 1 hardware results below are historical. The Russian `c5779ee` build
+
+Release 3 runtime `9b93f08` passed physical Flipper → four-slot history → SD
+save/reopen → RAW replay → Flipper decoding for two controlled Princeton
+bursts. The saved second signal was decoded as A53B53 in four packets. The
+tested 45 writable/stable registers, PA table and prior RX/IDLE state restored.
+Controlled two-way normal-UI/Flipper-CLI plaintext chat, nine frequency/restore
+checks, keyboard preview with TX count zero, and eleven SD apps at 120 frames
+each also passed. See [the release 3 test report](TEST_REPORT.md) for exact
+scope and counts. Enhanced GUI RF and the companion FAP remain unverified.
+
+The earlier release 1/2 hardware records are historical. The Russian `c5779ee` build
 passed its three-job CI run and all eleven installed SD apps passed 120
 diagnostic frames each on ESP32, with radio starts disabled. The user confirmed
 that physical chat still failed in both directions on that build. A later
@@ -37,13 +47,14 @@ eleven apps passed 120 diagnostic frames each. Earlier `d63f1ca` evidence is his
 | Spectrum Analyzer |64 sequential bins, step choices, graph, peak hold, CSV | Channel bounds/parameter checks | Settling time and measured peaks pending |
 | RAW Analyzer | Count/duration/min/max/gaps and pulse-index view | Statistics/decoder tests | Visual usability pending |
 | Signal Manager |39 lightweight directory identities per page plus a separate Next Page row; page/total header, hold DOWN/UP for pages, BACK previous page before parent; complete UTF-8 paths up to 1023 bytes; metadata/rename/move/duplicate/delete | 1,108,737 pagination/path checks plus 5,026 actual-browser mock checks; directory sizes 0–1000, stale identities, long names and page bounds | Final FAT/SD/button workflow pending on the latest image |
-| Static `.sub` Send | RcSwitch (protocol 1, 1..32 bits) / Princeton 1..32 / CAME 12/24, six periods; exact file frequency and binary OOK config, manual hold OK, finite RMT; CAME LOW-header rotation disclosed | 1,066,348 encoder/parser/config checks, period decoding and bounds | Physical waveform/reception pending; KeeLoq/Alutech/StarLine and other dynamic protocols have no encoder |
-| Simple RAW file Send | One HIGH-first binary OOK RAW pass, at most 2048 intervals / 5 seconds; temporary lab profile / nominal 0 dBm restored after send/cancel | Parser/staging/config/time bounds; unsupported presets, shaping and FSK refused | Physical reproduction and reception pending |
+| Static `.sub` Send | RcSwitch (protocol 1, 1..32 bits) / Princeton 1..32 / CAME 12/24, six periods; exact file frequency and binary OOK config, manual hold OK, finite RMT; CAME LOW-header rotation disclosed | 1,066,348 encoder/parser/config checks, period decoding and bounds | Release 3 synthetic six-repeat sends passed finite completion and actual frequency/radio restoration checks across three nominal frequencies, without peer listening. Static-encoder peer reception remains unverified by those checks; dynamic protocols have no encoder |
+| Simple RAW file Send | One HIGH-first binary OOK RAW pass, at most 2048 intervals / 5 seconds; exact header frequency under FilePlayback policy, nominal 0 dBm; prior settings and physical radio state restored | Parser/staging/config/time bounds, 4,756 restoration-guard checks and 329 actual file/save/replay controller checks; unsupported presets, shaping and FSK refused | Release 3 `9b93f08`: saved history slot 2 reopened from SD and replayed once in 433,963 us; physical Flipper decoded A53B53 / four packets; tested 45 registers + PA + RX/IDLE restored. No claim for arbitrary protocols |
+| Friendly RAW history | Automatic 64-sample noise threshold; four immutable slots, UP/DOWN selection, OK save, continuous listening until full/pause/exit, confirmed clear; 30 ms burst grouping, no promotion of ongoing prefixes on manual pause | 5,561 startup/trigger-policy, 15,500 history-model and 567 actual history-UI checks; RAW ISR/worker adapters tested separately | Release 3: idle/noise precheck left history empty; two distinct Flipper bursts became 445/451-interval slots, both saved to SD; actual Russian OLED history viewed |
 | Signal Generator | Finite user LAB-OOK24 payload,52 intervals including terminator | Known payload/CRC, receiver-edge simulation | Actual waveform/RMT jitter pending |
 | Modulation Explorer | Sequential four-preset RSSI/edge comparison | Preset/config tests | Physical comparison pending; no automatic identification claim |
 | Music Lab | RAW inspection and finite binary OOK RMT playback | Parser/staging/timing bounds | ESP→Flipper RAW reception/timing pending |
 | ESP ACK chat | Shared protocol,160 ASCII bytes,4fragments, ACK/retry/backoff/discovery/duplicates, retained in Advanced | C99/C++11 loss/duplicate/delay/reboot/wrap/bounds tests | Supplied companion FAP/ESP ACK physical exchange remains unverified; distinguish it from the user's Enhanced plaintext app |
-| Simple Flipper plaintext chat | Read/send screen, automatic 433.920 MHz / plaintext / nominal 0 dBm TX-ready setup for the authorized Faraday test; manual sends, finite governor and packet/CRC/FIFO/state diagnostics | 205,361 C99 checks and 205,361 C++11 checks on Windows/Linux; profile/carrier-gate suite 1,048,643 checks; editor/UART controller 2,429 checks | Final `087f9b6` normal UI ↔ installed Flipper internal-radio CLI controlled plaintext exchange PASS at nominal 433.920 MHz with local +115 ppm trim; Enhanced GUI RF itself untested |
+| Simple Flipper plaintext chat | Read/send screen, automatic 433.920 MHz / plaintext / nominal 0 dBm TX-ready setup for the authorized Faraday test; manual sends, finite governor and packet/CRC/FIFO/state diagnostics | 205,361 C99 checks and 205,361 C++11 checks on Windows/Linux; profile/carrier-gate suite 1,048,643 checks; release 3 editor/UART controller 2,508 checks | Repeated on release 3 `9b93f08`: normal UI ↔ installed Flipper internal-radio CLI controlled plaintext exchange PASS at nominal 433.920 MHz with local +115 ppm trim; Enhanced GUI RF itself untested |
 | CC1101 reference-clock diagnostic | Finite idle-only GPIO4/PCNT probe, restores radio pin configuration and reports errors; no RF transmit | 246 checks of real probe under hardware mocks, including counter faults, timing and cleanup | Coarse reference-clock evidence is separate from fine RF accuracy; mocks do not measure the module |
 | Device-local frequency correction | Bounded signed-ppm correction, band-edge validation and NVS persistence; no global default offset | 6,730,289 arithmetic, persistence and guard checks | This unit's +115 ppm persisted across reset; busy save blocked; normal chat received valid CRC with zero FREQEST and controlled two-way CLI exchange passed; no external RF calibration |
 | Flipper FAP | Official1.5.1, API88.2, public exports, independent radio task | Shared protocol tests; actual strict FAP import check | Physical Flipper launch/UI/RF pending |
@@ -51,7 +62,7 @@ eleven apps passed 120 diagnostic frames each. Earlier `d63f1ca` evidence is his
 | Visible text keyboard |8 × 4 keys, selected-key highlight, pages, tail/count, permitted field alphabets and safe cancel; normal accepted chat text queues, USB preview never sends | 1,460,550 production-model checks under Zig/GCC plus GCC ASan/UBSan; actual editor/UART 2,429 checks | Final `087f9b6` OLED screenshot viewed: grid/highlight/actions/cursor/preview fit; preview TX 0 before/after and cancel-to-main passed without panic; see [keyboard guide](KEYBOARD_RU.md) |
 | Pocket main menu / appearance | Default Pocket plus Pages, List, Wii and DSi; same eight categories, icons, counters, scrollbar, SD status and retained settings migration | 21,892 renderer/model/migration checks on Windows Zig and Ubuntu GCC | Release 2 physical OLED/button/style check pending |
 | Categorized SD launcher | All apps/Tools/Games/Radio/Favorites/Recent; bounded comment metadata, safe filenames, 32-entry catalog, eight favorites and four recent apps persisted on SD | 758,551 checks, including 10,000 metadata mutations and 10,000 preference operations, filters/path/scroll bounds | Release 2 SD persistence, app info and navigation pending |
-| SD Apps / Lua SDK | Bounded VM, Russian drawing/input/clock and receive-only radio bindings; eleven source apps, including four games and four new utilities | Actual Lua VM/sandbox: 91,990 host checks and 16,500 sample frames; meaningful game/math/timer fixtures | All eleven final `087f9b6` apps PASS 120 diagnostic frames each with radio starts disabled; maximum app heap 32,872/49,152 bytes and longest reported callback 4,592 us |
+| SD Apps / Lua SDK | Bounded VM, Russian drawing/input/clock and receive-only radio bindings; eleven source apps, including four games and four new utilities | Actual Lua VM/sandbox: 91,990 host checks and 16,500 sample frames; meaningful game/math/timer fixtures | Repeated on release 3 `9b93f08`: all eleven apps PASS 120 diagnostic frames each, Lua self-test PASS and main-menu return. Historical `087f9b6` peaks were 32,872/49,152 bytes and 4,592 us; these are not new release 3 measurements |
 | Backup / flash utility | Full host read + independent esptool full-flash MD5 verification and saved-file SHA256; optional two-host-read mode; identity/segment gates | Host utility guards tested / reviewed as reported | Connected 4 MiB dump and independent verification succeeded; interrupted second host dump is not counted |
 
 ## Explicit incomplete items
@@ -86,9 +97,11 @@ eleven apps passed 120 diagnostic frames each. Earlier `d63f1ca` evidence is his
 - Scan history is the legacy analyzer history plus current/peak sweep data and
   SD exports. This is not a real-time SDR spectrum or calibrated power meter.
 - There is no authoritative Ukrainian channel/duty-cycle/ERP database embedded
-  in the ESP32. Radio tools retain the shielded-laboratory profile and two
-  finite channels. Simple Chat and file Send temporarily apply the user-authorized
-  Faraday setup with nominal 0 dBm TX ready; sends remain manual and finite.
+  in the ESP32. Chat's shielded-laboratory policy retains its two finite
+  channels. FilePlayback separately uses the exact nominal file frequency
+  within supported CC1101 bands, with the existing modem/protocol checks.
+  Simple Chat and file Send temporarily apply the user-authorized Faraday
+  setup with nominal 0 dBm TX ready; sends remain manual and finite.
   Chat alone adds the 1-second/60-second attempt-time governor. The Flipper
   separately applies its installed firmware's TX permission settings.
   Nominal PA values do not establish measured output or legal compliance.
