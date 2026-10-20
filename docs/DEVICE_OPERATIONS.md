@@ -91,7 +91,7 @@ The attached Flipper identifies as Unleashed086e, commit `e7e4e179`. Its
 Enhanced Chat app uses the firmware's radio worker. This differs from the
 separately supplied official1.5.1/API88.2 companion FAP build target.
 
-## Final release 2 image and controlled two-way chat
+## Pre-keyboard release 2 image and controlled two-way chat
 
 The final runtime source is `d63f1ca96d7af20b336cee8065ea862468adc343`.
 All four flash segments passed explicit esptool readback verification. The
@@ -139,6 +139,34 @@ longest observed callback was4,982us. The final reboot loaded115ppm, mounted SD,
 reported PART00/VERSION14 with zero SPI/ready timeouts, and reached the Russian
 Pocket menu with120,280 free heap bytes. A fresh framebuffer capture verified
 the actual menu rendering.
+
+## Final image with the visible keyboard
+
+The final runtime source is now `087f9b68fd8f2242e26fdab1054e8d0e72b3134c`.
+Its application image is **1,706,208 bytes**, SHA256
+`8e14bc05f2c7ac5342035ddc9185c69ef376e270dc00e8968f0cf79772ba569a`.
+All four segments again passed explicit device readback verification. The
+Windows build reports 118,872 static RAM bytes and 1,699,637 linked flash bytes.
+
+The actual OLED framebuffer showed the new8x4 keyboard, selected key, input
+preview/count and SP/delete/page/Done actions. A deferred editor preview opened
+and closed with TXcount0 throughout, no panic, and the main menu restored.
+The capture is included in [the Russian keyboard guide](KEYBOARD_RU.md).
+
+The controlled short plaintext test above was repeated successfully on this
+image: both distinct Flipper CLI messages reached the normal ESP chat UI;
+three packets passed CRC with no CRC/FIFO/SPI errors and FREQEST0. The peer
+actually printed ESP-HACK:TEST123 for one manually requested ESP send.
+The115ppm value survived reset and an active-chat save attempt was rejected.
+One earlier repeat did not start the Flipper CLI command while Enhanced Chat
+was running; it is retained as an invalid test, not an RF failure. The app was
+temporarily closed for the valid CLI test and then relaunched from its existing
+SD file. Relaunching it is not an Enhanced GUI chat/RF test.
+
+All eleven SD apps again passed120frames each after this keyboard flash. The
+largest VM peak remained32,872/49,152 bytes; the longest observed callback in
+this run was4,592us. Boot reached the SH1106 main menu with SD mounted,
+120,280 free heap bytes, loaded115ppm and no radio SPI/ready timeouts.
 
 ## Physical checks still needed
 
