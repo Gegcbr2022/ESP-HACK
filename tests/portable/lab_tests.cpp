@@ -16,6 +16,20 @@ int main() {
     CHECK(!permitLabTx(TxProfile::ShieldedLab,433920000,1001,1000));
     CHECK(!permitLabTx(TxProfile::ShieldedLab,433920000,100,5001));
     CHECK(!permitLabTx(TxProfile::ShieldedLab,433920000,UINT32_MAX,5000));
+    CHECK(cc1101FrequencyWord(433920000UL)==1093745UL);
+    CHECK(!cc1101FrequencyWord(0)); CHECK(!cc1101FrequencyWord(348000001));
+    CHECK(!cc1101FrequencyWord(500000000)); CHECK(!cc1101FrequencyWord(UINT32_MAX));
+    const uint32_t bands[][2]={{300000000,348000000},{387000000,464000000},{779000000,928000000}};
+    for(unsigned b=0;b<3;++b) for(unsigned i=0;i<=1000;++i) {
+        const uint32_t hz=bands[b][0]+uint32_t(uint64_t(bands[b][1]-bands[b][0])*i/1000);
+        const uint32_t word=cc1101FrequencyWord(hz);
+        const uint64_t synthesized=uint64_t(word)*26000000;
+        CHECK(synthesized>=uint64_t(bands[b][0])*65536);
+        CHECK(synthesized<=uint64_t(bands[b][1])*65536);
+        const uint64_t target=uint64_t(hz)*65536;
+        const uint64_t error=synthesized>target?synthesized-target:target-synthesized;
+        CHECK(error<26000000); // less than one synthesizer step, including edge clamps.
+    }
     CHECK(rmtHalves(0)==0); CHECK(rmtHalves(INT32_MIN)==0);
     const int32_t durations[]={1,32766,32767,32768,65534,65535,INT32_MAX};
     for(unsigned i=0;i<sizeof durations/sizeof durations[0];++i) {
