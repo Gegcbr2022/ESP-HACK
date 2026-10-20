@@ -1,4 +1,4 @@
-# ESP-HACK Radio Lab — v1.3-rf-lab.1
+# ESP-HACK Radio Lab — v1.3-rf-lab.2
 
 An engineering fork of Teapot174/ESP-HACK, upstream commit
 `8c57584c6a39fc3ac948ce2277337a5dd2915baf`, for the existing ESP32 DevKit V1,
@@ -8,13 +8,22 @@ original third-party license notices retained. Development branch:
 
 ## Start here
 
-Open **SubGHz → Radio Lab**. The original main applications remain available.
-The lab uses an independent radio task and a small monochrome list interface;
-display rendering and SD operations do not run in the GPIO edge ISR.
+The default **Pocket** main menu has category icons, three visible rows,
+selection/scroll indicators and SD status. **Settings → Interface → Menu**
+offers five styles: Pages, List, Wii, DSi and Pocket. Existing application
+category IDs and wiring remain unchanged; see [Pocket interface](docs/POCKET_UI.md).
+Open **SubGHz → Radio Lab** for radio tools. Its independent radio task keeps
+display rendering and SD operations outside the GPIO edge ISR.
 
 Open **SD Apps** from the main menu to run Lua applications from `/apps`.
-Five examples, including Snake and 2048, and the [app SDK](docs/APPS_SDK.md) are included. Install a new
-app over USB with `python scripts/install_app.py --port COM4 my_app.lua` while
+The launcher groups apps into All apps, Tools, Games, Radio, Favorites and
+Recent. Comment metadata supplies friendly titles, categories and descriptions;
+up to eight favorites and four recent apps persist on SD. Eleven source apps
+include four games, a countdown, calculator, unit converter, resistor code
+reader, hello, stopwatch and receive-only RF dashboard. See the
+[SDK](docs/APPS_SDK.md), [utilities](docs/SD_UTILITIES.md) and
+[games](docs/SD_GAMES.md). Install a new app over USB with
+`python scripts/install_app.py --port COM4 my_app.lua` while
 the main menu is open. This transfers the source to SD and checks its SHA256;
 it does not flash the ESP32. Apps can draw, handle buttons, keep time and use
 receive-only radio measurements within bounded memory and callback budgets.
@@ -44,14 +53,14 @@ receive-only radio measurements within bounded memory and callback budgets.
   The RMT peripheral produces pulse durations at a nominal 1 us tick. Wall-time
   completion diagnostics do not measure RF edge jitter. Async FSK playback,
   conventional FM audio and note-to-speaker decoding are not implemented.
-- **Chat:** 160 printable ASCII bytes, discovery, peers, 40-byte fragments,
-  CRCs, ACKs, retry/backoff, duplicate suppression and RAM message history.
-  Install the included FAP on official Flipper firmware 1.5.1/API88.2.
-  Chat is unencrypted and unauthenticated.
-  Select **Mode: Flipper plain** for the standard CLI / Enhanced Sub-GHz Chat
-  plaintext protocol instead. In Enhanced Chat choose **No encryption** and
-  the same frequency. This mode broadcasts text without delivery ACKs; see
-  [compatibility details](docs/FLIPPER_CHAT_COMPATIBILITY.md).
+- **Chat:** a simple read/send screen opens with 433.920 MHz, Flipper plaintext
+  and nominal 0 dBm selected automatically for the user's authorized Faraday
+  setup. OK opens message entry or quick messages such as TEST123; UP/DOWN
+  browse history. On Enhanced Sub-GHz Chat choose **No encryption** and the same
+  frequency. Sent means local transmission, with no peer ACK. Advanced mode
+  retains the ESP ACK protocol and companion official-1.5.1/API88.2 FAP.
+  Both formats support up to 160 printable ASCII text bytes and remain
+  unencrypted and unauthenticated. See [compatibility details](docs/FLIPPER_CHAT_COMPATIBILITY.md).
 - **Diagnostics:** chip/register/state/RSSI/FIFO/timeout information, serial
   logs and reset/recovery. Boot performs a receive-only radio probe. Send
   `rfdiag` followed by a newline at 115200 baud while on the main menu to
@@ -62,18 +71,30 @@ receive-only radio measurements within bounded memory and callback budgets.
 UP/DOWN navigate; OK opens; BACK returns. Text entry uses UP/DOWN to select a
 character, OK to append, BACK to delete, hold OK to finish, hold BACK to cancel.
 Release the initiating button before the next screen accepts a new action.
-Long informational screens scroll with UP/DOWN. Transmission requires a fresh
-hold-OK action; BACK aborts RAW playback.
+Long informational screens scroll with UP/DOWN. RAW transmission requires a
+fresh hold-OK action; BACK aborts RAW playback. Chat uses its manual send menu.
 
-New TX defaults off. In Radio Settings select **Shielded laboratory** only for
+Radio Lab TX defaults off. In Radio Settings select **Shielded laboratory** for
 the intended controlled setup, then choose a nominal -10/0/+10 dBm setting.
+Opening the simple Chat screen temporarily applies its automatic 433.920 MHz /
+Flipper plaintext / nominal 0 dBm TX-ready profile for this authorized setup;
+messages still require a manual send action. Leaving Chat restores the previous
+settings. It does not send an automatic beacon.
 The new ESP32 TX policy allows only the explicit laboratory channels
 433.920/868.350 MHz and at most 5 seconds per RAW operation. Chat adds finite
-per-packet deadlines, a 100 ms gap and a fixed-window airtime budget. The Flipper
+per-packet deadlines, a 100 ms gap and a local 1-second/60-second attempt-time
+governor. The Flipper
 also enforces the official firmware's regional TX permission. These are bounded
 laboratory profiles, not a Ukrainian regulatory certification. PA values and
 the antenna/matching network have not been measured. The profile resets to RX
 only on each Radio Lab launch; it is not written to SD as a TX authorization.
+
+The user reported failed reception in both ESP32/Flipper directions on the
+preceding firmware. Release 2 adds the simpler setup and packet/CRC/FIFO/state
+diagnostics; a successful RF exchange has not yet been established. Final
+release 2 image identification, flash verification and the eleven-app on-device
+diagnostic remain pending the release owner's recorded results. Historical
+release 1 flash/probe/app evidence is kept separately in the test report.
 
 ## Build, test, flash and rollback
 
@@ -92,6 +113,11 @@ upstream history and incremental development commits. Public fork:
 - [Physical validation procedure](docs/HARDWARE_VALIDATION.md)
 - [Feature status and limitations](docs/FEATURE_STATUS.md)
 - [Test report](docs/TEST_REPORT.md)
+
+Release 2 native checks pass on Windows Zig and Ubuntu GCC: 91,617 Lua checks
+with 16,500 sample frames across eleven apps, 758,543 catalog checks and 22,235
+menu/rendering/migration checks. These results cover software behavior and
+bounds; they do not establish physical OLED/button usability or RF performance.
 
 Compiled/native-tested behavior is distinct from physical RF validation. A
 successful flash, chip probe or OLED boot cannot establish receiver sensitivity,
