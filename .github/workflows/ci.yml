@@ -38,6 +38,7 @@ jobs:
       - run: python tests/raw_worker_mock/run.py --compiler g++
       - run: python tests/triggered_capture/run_triggered_tests.py --compiler g++
       - run: python tests/capture_history/run.py --compiler g++
+      - run: python tests/capture_history_ui_mock/run.py --compiler g++
       - run: python tests/lua_sandbox/run.py --compiler gcc
       - run: python tests/app_install_mock/run.py --cxx g++
       - run: python -m unittest discover -s tests/host -v
