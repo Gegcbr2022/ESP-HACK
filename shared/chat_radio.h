@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /* CC1101 26MHz crystal. See TI SWRS061, sections 13-17 and register descriptions.
- * 2-FSK, 9595.87bit/s, deviation19042.97Hz, bandwidth101562.5Hz, sync D391,
+ * 2-FSK, 38383.48bit/s, deviation19042.97Hz, bandwidth101562.5Hz, sync D391,
  * 4-byte preamble, 30/32-bit sync qualifier, whitening, variable-length + CRC16.
  * End of RX/TX returns IDLE; caller must flush/read and explicitly rearm RX.
  * Reg0 is deliberately omitted: Flipper's exported preset parser uses address0

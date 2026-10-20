@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 namespace research {
+enum class ChatMode : uint8_t { EspAck, FlipperPlaintext };
 struct LabSnapshot {
     bool active, connected, carrier, captureFull, captureTriggered, captureComplete;
     LabMode mode;
@@ -21,12 +22,15 @@ struct LabSnapshot {
     uint16_t peer, self;
     uint16_t peers[8];
     uint32_t receivedMessages, sentMessages, chatRetries;
+    uint32_t plaintextRejected, plaintextTruncated;
+    ChatMode chatMode;
     uint8_t delivery;
     char message[161], status[64];
 };
 // One radio worker owns every SPI transaction while active. No OLED or SD in it.
 bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& settings,
-              TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz = 25000);
+              TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz = 25000,
+              ChatMode chatMode = ChatMode::EspAck);
 bool labStop();
 void labRequestStop();
 LabSnapshot labSnapshot();

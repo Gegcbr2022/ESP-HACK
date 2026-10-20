@@ -4,6 +4,7 @@
 #include "../CONFIG.h"
 #include "../../shared/chat_radio.h"
 #include "../../shared/chat_session.h"
+#include "../../shared/flipper_chat_compat.h"
 #include <Arduino.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include <driver/rmt.h>
@@ -45,6 +46,8 @@ QueueHandle_t inbox;
 int32_t* capture;
 size_t captured;
 ChatSession chat;
+FlipperChatRx plaintextRx;
+FlipperChatTx plaintextTx;
 // At most 2048 pulses plus splits; 4096 half-items cover all <=5s waveforms.
 rmt_item32_t* rmtItems;
 
@@ -252,8 +255,19 @@ bool readPacket(uint8_t* frame, size_t& length) {
     receive(activeSettings.frequencyHz, false);
     return valid;
 }
+void publishMessage(uint16_t source, const char* text) {
+    IncomingMessage incoming = {}; incoming.source = source;
+    snprintf(incoming.text, sizeof(incoming.text), "%s", text);
+    if(xQueueSend(inbox, &incoming, 0) != pdTRUE) {
+        IncomingMessage old; xQueueReceive(inbox, &old, 0); xQueueSend(inbox, &incoming, 0);
+    }
+    portENTER_CRITICAL(&lock);
+    snprintf(state.message, sizeof(state.message), "%s", text);
+    portEXIT_CRITICAL(&lock);
+}
 void worker(void*) {
     LabMode mode = state.mode;
+    const bool plaintext = state.chatMode == ChatMode::FlipperPlaintext;
     if(mode == LabMode::Explorer) loadPreset("AM270",activeImage);
     bool configured = configure(activeImage, activeSettings.frequencyHz);
     if(configured && (mode == LabMode::Raw || mode == LabMode::Explorer))
@@ -332,7 +346,13 @@ void worker(void*) {
             // Session engine calls are owned by this task, including UI commands.
             ChatCommand command;
             if(xQueueReceive(commands, &command, 0) == pdTRUE) {
-                if(command.discover) chat_session_discover(&chat);
+                if(plaintext) {
+                    const char* text = command.discover ? "online" : command.text;
+                    if(activeProfile != TxProfile::ShieldedLab ||
+                       !flipper_chat_tx_queue(&plaintextTx, text, strlen(text), now)) status("Chat busy or TX off");
+                    else previousDelivery = ChatQueued; // A one-packet line can finish in this iteration.
+                }
+                else if(command.discover) chat_session_discover(&chat);
                 else {
                     const uint16_t recipient = command.destination ? command.destination : state.peer;
                     if(!recipient) status("Discover/select peer first");
@@ -340,37 +360,48 @@ void worker(void*) {
                 }
             }
             uint8_t frame[64]; size_t length = 0;
-            if(readPacket(frame, length) && chat_session_receive(&chat, frame, length, now)) {
-                ++receivedMessages;
-                IncomingMessage incoming = {};
-                incoming.source = chat.received.source;
-                snprintf(incoming.text, sizeof(incoming.text), "%s", chat.received.text);
-                if(xQueueSend(inbox, &incoming, 0) != pdTRUE) {
-                    IncomingMessage old; xQueueReceive(inbox, &old, 0); xQueueSend(inbox, &incoming, 0);
+            if(plaintext) {
+                FlipperChatMessage message;
+                if(flipper_chat_rx_poll(&plaintextRx, now, &message)) {
+                    publishMessage(0, message.text); ++receivedMessages;
                 }
-                portENTER_CRITICAL(&lock);
-                snprintf(state.message, sizeof(state.message), "%s", chat.received.text);
-                portEXIT_CRITICAL(&lock);
+                if(readPacket(frame, length)) for(size_t i = 0; i < length; ++i) {
+                    if(flipper_chat_rx_byte(&plaintextRx, frame[i], now, &message)) {
+                        publishMessage(0, message.text); ++receivedMessages;
+                    }
+                }
+            } else if(readPacket(frame, length) && chat_session_receive(&chat, frame, length, now)) {
+                publishMessage(chat.received.source, chat.received.text); ++receivedMessages;
             }
             if(now - budgetStart >= 60000) { budgetStart = now; airtimeMs = 0; }
+            // Reserve the worst-case100ms deadline for every unsent plaintext
+            // chunk before starting. Our own budget cannot split a line for60s.
+            const uint32_t allowance = plaintext && plaintextTx.offset == 0 && plaintextTx.length ?
+                ((plaintextTx.length + FLIPPER_CHAT_PACKET - 1) / FLIPPER_CHAT_PACKET) * 100 : 100;
             const bool busy = (ELECHOUSE_cc1101.SpiReadStatus(0x38) & 0x40) ||
-                              int32_t(now - nextTx) < 0 || airtimeMs + 100 > 1000;
-            length = chat_session_poll(&chat, now, busy, frame, sizeof(frame));
+                              int32_t(now - nextTx) < 0 || airtimeMs + allowance > 1000;
+            length = plaintext ? flipper_chat_tx_poll(&plaintextTx, now, busy, frame, sizeof(frame)) :
+                                 chat_session_poll(&chat, now, busy, frame, sizeof(frame));
             if(length) {
                 const uint32_t started = millis();
                 bool sent = transmitPacket(frame, length);
-                chat_session_tx_result(&chat, sent, millis());
+                if(plaintext) flipper_chat_tx_result(&plaintextTx, sent);
+                else chat_session_tx_result(&chat, sent, millis());
                 // Charge the whole attempt (including failed/timeout TX).
                 airtimeMs += millis() - started;
                 nextTx = millis() + 100;
             }
-            if(chat.delivery == ChatDelivered && previousDelivery != ChatDelivered) ++sentMessages;
-            previousDelivery = chat.delivery;
+            const ChatDelivery delivery = plaintext ? ChatDelivery(plaintextTx.delivery) : chat.delivery;
+            if(delivery == ChatDelivered && previousDelivery != ChatDelivered) ++sentMessages;
+            previousDelivery = delivery;
             portENTER_CRITICAL(&lock);
             state.receivedMessages = receivedMessages; state.sentMessages = sentMessages;
-            state.delivery = chat.delivery; state.chatRetries = chat.attempts;
-            for(size_t i = 0; i < 8; ++i) state.peers[i] = chat.peers[i].id;
-            if(chat.peers[0].id) state.peer = chat.peers[0].id;
+            state.delivery = delivery; state.chatRetries = plaintext ? 0 : chat.attempts;
+            state.plaintextRejected = plaintextRx.rejected; state.plaintextTruncated = plaintextRx.truncations;
+            if(!plaintext) {
+                for(size_t i = 0; i < 8; ++i) state.peers[i] = chat.peers[i].id;
+                if(chat.peers[0].id) state.peer = chat.peers[0].id;
+            }
             portEXIT_CRITICAL(&lock);
         }
         if(activeSettings.rxTimeoutMs && mode != LabMode::Chat && now - rxStart >= activeSettings.rxTimeoutMs) {
@@ -393,7 +424,7 @@ void worker(void*) {
 }
 
 bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& settings,
-              TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz) {
+              TxProfile profile, uint8_t powerIndex, uint32_t sweepStepHz, ChatMode chatMode) {
     if(!labStop()) return false;
     if(mode==LabMode::Raw&&!capture) {
         capture=static_cast<int32_t*>(heap_caps_malloc(kWaveformCapacity*sizeof(int32_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
@@ -412,18 +443,21 @@ bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& set
     case LabMode::Sweep:event=LabEvent::StartSweep;break;case LabMode::Explorer:event=LabEvent::StartExplorer;break;
     case LabMode::Chat:event=LabEvent::StartChat;break;default:break;}
     state.mode = transition(LabMode::Idle,event); state.active = true; state.rssiDbm = state.peakDbm = -127;
+    state.chatMode = chatMode;
     for(size_t i = 0; i < kSweepBins; ++i) state.sweep[i] = state.peakHold[i] = -127;
     snprintf(state.status, sizeof(state.status), "Starting radio");
     stopRequested = false; xEventGroupClearBits(events, kDone);
     if(mode == LabMode::Chat) {
         activeImage = RegisterImage();
-        for(size_t i = 0; i < CHAT_RADIO_REGISTER_BYTES; i += 2)
-            activeImage.set(chat_radio_registers[i], chat_radio_registers[i+1]);
+        const uint8_t* registers = chatMode == ChatMode::FlipperPlaintext ? flipper_chat_registers : chat_radio_registers;
+        const size_t registerBytes = chatMode == ChatMode::FlipperPlaintext ? FLIPPER_CHAT_REGISTER_BYTES : CHAT_RADIO_REGISTER_BYTES;
+        for(size_t i = 0; i < registerBytes; i += 2) activeImage.set(registers[i], registers[i+1]);
         state.self = uint16_t(ESP.getEfuseMac()) ?: 1;
         // Initialized with a random boot session so rebooted senders do not reuse IDs.
         chat_session_init(&chat, state.self, uint16_t(esp_random()) ?: 1, "ESP-HACK", esp_random());
         state.self = chat.id;
         chat_session_enable_tx(&chat, profile == TxProfile::ShieldedLab);
+        flipper_chat_rx_init(&plaintextRx); flipper_chat_tx_init(&plaintextTx);
     }
     if(xTaskCreatePinnedToCore(worker, "radio-lab", 6144, nullptr, 2, &workerHandle, 0) != pdPASS) {
         workerHandle = nullptr; state.active = false; status("No RAM for worker"); return false;
@@ -443,11 +477,15 @@ LabSnapshot labSnapshot() {
     return result;
 }
 bool labQueueText(const char* text, uint16_t destination) {
-    if(!text || !*text || strlen(text) > 160 || !commands || !state.active) return false;
+    const LabSnapshot current = labSnapshot();
+    if(!text || !*text || strlen(text) > 160 || !commands || !current.active || current.mode != LabMode::Chat ||
+       activeProfile != TxProfile::ShieldedLab) return false;
     ChatCommand c = {}; c.destination = destination; snprintf(c.text, sizeof(c.text), "%s", text);
     return xQueueSend(commands, &c, 0) == pdTRUE;
 }
 bool labDiscover() {
+    const LabSnapshot current = labSnapshot();
+    if(!current.active || current.mode != LabMode::Chat || activeProfile != TxProfile::ShieldedLab) return false;
     ChatCommand c = {}; c.discover = true;
     return commands && xQueueSend(commands, &c, 0) == pdTRUE;
 }

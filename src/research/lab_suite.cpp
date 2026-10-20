@@ -18,6 +18,7 @@ RadioSettings settings;
 RegisterImage radio;
 TxProfile profile = TxProfile::ReceiveOnly;
 uint8_t powerIndex = 0;
+ChatMode chatFormat = ChatMode::EspAck;
 uint32_t sweepStep = 25000;
 int32_t waveform[kWaveformCapacity];
 size_t waveformCount;
@@ -183,7 +184,7 @@ bool selectPreset(size_t index) {
     radio = next; snprintf(activePreset, sizeof(activePreset), "%s", p->name); return true;
 }
 bool startMode(LabMode mode) {
-    if(!labStart(mode, radio, settings, profile, powerIndex, sweepStep)) { showNotice("Worker start failed"); return false; }
+    if(!labStart(mode, radio, settings, profile, powerIndex, sweepStep, chatFormat)) { showNotice("Worker start failed"); return false; }
     return true;
 }
 void saveCapture() {
@@ -493,24 +494,26 @@ void addHistory(uint16_t peer,bool sent,const char* text){History& h=history[his
 void readHistory(){
     size_t selected=0,offset=0;resetInput();
     while(true){input();if(back||holdBack)break;if(up&&selected) {--selected;offset=0;}if(down&&selected+1<historySize){++selected;offset=0;}if(ok&&historySize){const History& h=history[(historyNext+8-1-selected)%8];offset=offset+60<strlen(h.text)?offset+60:0;}
-        if(frame()){title("Chat history");if(historySize){const History& h=history[(historyNext+8-1-selected)%8];char b[32];snprintf(b,sizeof(b),"%s %04X (%u/%u)",h.sent?"To":"From",h.peer,unsigned(selected+1),unsigned(historySize));line(2,b);for(size_t row=0;row<3;++row){size_t pos=offset+row*20;if(pos<strlen(h.text)){snprintf(b,21,"%.20s",h.text+pos);display.setCursor(0,28+row*8);display.print(b);}}}else line(3,"No messages yet");footer("UP/DN item OK page BK");display.display();}}
+        if(frame()){title("Chat history");if(historySize){const History& h=history[(historyNext+8-1-selected)%8];char b[32];if(h.peer)snprintf(b,sizeof(b),"%s %04X (%u/%u)",h.sent?"To":"From",h.peer,unsigned(selected+1),unsigned(historySize));else snprintf(b,sizeof(b),"Broadcast %s (%u/%u)",h.sent?"TX":"RX",unsigned(selected+1),unsigned(historySize));line(2,b);for(size_t row=0;row<3;++row){size_t pos=offset+row*20;if(pos<strlen(h.text)){snprintf(b,21,"%.20s",h.text+pos);display.setCursor(0,28+row*8);display.print(b);}}}else line(3,"No messages yet");footer("UP/DN item OK page BK");display.display();}}
     resetInput();
 }
 void chatApp(){
     if(!laboratoryChannel(settings.frequencyHz)){message("Sub-GHz Chat","Select 433920000 or 868350000 Hz in Radio Settings. Both devices must match.");return;}
-    if(!startMode(LabMode::Chat))return;uint16_t recipient=0;size_t selected=0;static const char* items[]={"Inbox / sent history","Compose message","Discover devices","Select recipient","Delivery status"};resetInput();
+    if(!startMode(LabMode::Chat))return;uint16_t recipient=0;size_t selected=0;static const char* items[]={"Inbox / sent history","Compose message","Discover devices","Select recipient","Delivery status","Mode: ESP ACK"};resetInput();
     while(true){
         input();uint16_t source;char received[161];while(labReceiveMessage(source,received,sizeof(received)))addHistory(source,false,received);
-        if(back||holdBack)break;if(up)selected=(selected+4)%5;if(down)selected=(selected+1)%5;
+        const bool plaintext=chatFormat==ChatMode::FlipperPlaintext;
+        if(back||holdBack)break;if(up)selected=(selected+5)%6;if(down)selected=(selected+1)%6;
         if(ok){
             if(selected==0)readHistory();
-            if(selected==1){char text[161]="";if(textEntry("Compose ASCII",text,sizeof(text))){LabSnapshot s=labSnapshot();uint16_t to=recipient?recipient:s.peer;if(labQueueText(text,to)){addHistory(to,true,text);showNotice("Queued");}else showNotice("Queue full or radio off");}}
-            if(selected==2)labDiscover();
-            if(selected==3){LabSnapshot s=labSnapshot();size_t index=0;for(size_t i=0;i<8;++i)if(s.peers[i]==recipient)index=i+1;recipient=s.peers[index%8];}
-            if(selected==4){LabSnapshot s=labSnapshot();char b[120];snprintf(b,sizeof(b),"Delivery %u\n0idle 1queued 2sending\n3delivered 4failed\nRX%lu TX%lu attempt%lu",s.delivery,(unsigned long)s.receivedMessages,(unsigned long)s.sentMessages,(unsigned long)s.chatRetries);message("Delivery",b);}
+            if(selected==1){char text[161]="";if(textEntry("Compose ASCII",text,sizeof(text))){LabSnapshot s=labSnapshot();uint16_t to=plaintext?0:(recipient?recipient:s.peer);if(labQueueText(text,to)){addHistory(to,true,text);showNotice(plaintext?"Queued broadcast; no ACK":"Queued");}else showNotice("Queue full or TX off");}}
+            if(selected==2){if(!labDiscover())showNotice("TX off or command queue full");else showNotice(plaintext?"Presence queued; no ACK":"Discovery queued");}
+            if(selected==3){if(plaintext)message("Flipper plaintext","Broadcast to all listeners. Select No encryption in Enhanced Sub-GHz Chat and use the same frequency. No peer IDs or acknowledgements.");else{LabSnapshot s=labSnapshot();size_t index=0;for(size_t i=0;i<8;++i)if(s.peers[i]==recipient)index=i+1;recipient=s.peers[index%8];}}
+            if(selected==4){LabSnapshot s=labSnapshot();char b[190];if(plaintext)snprintf(b,sizeof(b),"State %u: 0idle 1queued\n2sending 3sent 4failed\nSent means local RF only.\nNo acknowledgement.\nRX%lu TX%lu\nRejected%lu truncated%lu",s.delivery,(unsigned long)s.receivedMessages,(unsigned long)s.sentMessages,(unsigned long)s.plaintextRejected,(unsigned long)s.plaintextTruncated);else snprintf(b,sizeof(b),"Delivery %u\n0idle 1queued 2sending\n3delivered 4failed\nRX%lu TX%lu attempt%lu",s.delivery,(unsigned long)s.receivedMessages,(unsigned long)s.sentMessages,(unsigned long)s.chatRetries);message("Delivery",b);}
+            if(selected==5){if(!labStop()){showNotice("Radio still stopping");continue;}chatFormat=plaintext?ChatMode::EspAck:ChatMode::FlipperPlaintext;recipient=0;historySize=historyNext=0;if(!startMode(LabMode::Chat))break;showNotice(chatFormat==ChatMode::FlipperPlaintext?"Flipper plaintext; encryption off":"ESP ACK protocol");}
             resetInput();
         }
-        if(frame()){LabSnapshot s=labSnapshot();title("Sub-GHz Chat");char b[40];snprintf(b,sizeof(b),"Me%04X To%04X %ddBm",s.self,recipient?recipient:s.peer,s.rssiDbm);line(2,b);line(3,items[selected]);line(4,profile==TxProfile::ShieldedLab?"TX: shielded laboratory":"TX off: Radio Settings");footer("UP/DN item OK open BK");display.display();}
+        if(frame()){LabSnapshot s=labSnapshot();const bool plain=chatFormat==ChatMode::FlipperPlaintext;title(plain?"Flipper plaintext":"Sub-GHz Chat / ACK");char b[40];if(plain)snprintf(b,sizeof(b),"%lu Hz %ddBm",(unsigned long)s.frequencyHz,s.rssiDbm);else snprintf(b,sizeof(b),"Me%04X To%04X %ddBm",s.self,recipient?recipient:s.peer,s.rssiDbm);line(2,b);line(3,selected==5?(plain?"Mode: Flipper plain":"Mode: ESP ACK"):selected==2&&plain?"Send presence":selected==3&&plain?"Compatibility info":items[selected]);line(4,profile==TxProfile::ShieldedLab?"TX: shielded laboratory":"TX off: Radio Settings");footer("UP/DN item OK open BK");display.display();}
     }
     labStop();resetInput();
 }
@@ -519,7 +522,7 @@ void chatApp(){
 void runRadioLab() {
     using namespace research;
     suspendLegacyReceive();
-    settings=RadioSettings();settings.rxTimeoutMs=30000;selectPreset(0);profile=TxProfile::ReceiveOnly;powerIndex=0;
+    settings=RadioSettings();settings.rxTimeoutMs=30000;selectPreset(0);profile=TxProfile::ReceiveOnly;powerIndex=0;chatFormat=ChatMode::EspAck;
     SD.mkdir("/subghz");SD.mkdir("/subghz/presets");
     static const char* apps[]={"Read laboratory","Read RAW","Frequency Analyzer","Spectrum Analyzer","RAW Signal Analyzer","Protocol Analyzer","Signal Manager","Signal Generator","Radio Settings","Modulation Explorer","Sub-GHz Chat","Music Lab","CC1101 Diagnostics","About"};
     const size_t count=sizeof(apps)/sizeof(apps[0]);size_t selected=0;resetInput();
