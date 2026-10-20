@@ -12,7 +12,7 @@ class Adafruit_GFX {
   int cursorX=0,cursorY=0,textSize=1,ink=1;
 public:
   uint8_t pixels[64][128] = {};
-  unsigned clipped=0,frames=0;
+  unsigned clipped=0,frames=0,fontChanges=0;
   std::vector<TextCall> labels;
   std::vector<BoxCall> rounded;
   int width()const{return 128;}
@@ -64,12 +64,25 @@ public:
     for(int row=0;row<h;++row)for(int col=0;col<w;++col)
       if(bits[row*stride+col/8]&(0x80>>(col&7)))drawPixel(x+col,y+row,color);
   }
-  void setFont(const void*){}
+  void setFont(const void*){++fontChanges;}
   void setTextColor(int value){ink=value;}
   void setTextColor(int value,int){ink=value;}
   void setTextSize(int size){textSize=size;}
   void setTextWrap(bool){}
   void setCursor(int x,int y){cursorX=x;cursorY=y;}
+  int16_t getCursorX()const{return cursorX;}
+  int16_t getCursorY()const{return cursorY;}
+  void drawChar(int x,int y,unsigned char c,int color,int,uint8_t scale) {
+    const std::string value(1,char(c));
+    if(!labels.empty()&&scale==1&&labels.back().y==y&&labels.back().color==color&&
+       labels.back().x+int(labels.back().value.size())*6==x)labels.back().value+=value;
+    else labels.push_back({x,y,color,value});
+    for(int col=0;col<5;++col)for(int row=0;row<8;++row)if(font[c*5+col]&(1<<row))
+      for(int dx=0;dx<scale;++dx)for(int dy=0;dy<scale;++dy) {
+        const int px=x+col*scale+dx,py=y+row*scale+dy;
+        if(px>=0&&px<128&&py>=0&&py<64)drawPixel(px,py,color);
+      }
+  }
   void print(const char* text) {
     labels.push_back({cursorX,cursorY,ink,text?text:""});
     if(!text)return;

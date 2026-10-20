@@ -11,3 +11,4 @@ void footer(DisplayType& display, const char* hint);
 }
 
 void displayPocketMenu(DisplayType& display, byte menuIndex);
+const char* pocketMenuLabel(uint8_t category);

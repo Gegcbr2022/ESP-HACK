@@ -6,6 +6,12 @@ and button hints. `SD` means the card is mounted; `--` means unavailable. It doe
 not imply battery monitoring or radio transmission. Icons are original line
 drawings; no Flipper mascot or artwork is included.
 
+Pocket now uses Russian category labels: Радио SubGHz, Инфракрасный, Пины GPIO,
+Игры, Настройки and Приложения SD; protocol names Wi-Fi and Bluetooth retain
+their usual spelling. The four existing menu styles retain their labels.
+The small native font supports А-Я, а-я, Ё/ё and printable ASCII. Text uses
+six-pixel cells and clips only between complete UTF-8 characters.
+
 UP/DOWN move through the same eight categories; OK opens the selected one.
 Settings → Interface → Menu offers Pages, List, Wii, DSi and Pocket. Existing
 category IDs and functions remain unchanged.
@@ -29,3 +35,10 @@ Host previews and migration tests are generated with
 `python tests/pocket_menu/run.py --compiler g++ --snapshots test-results/pocket`.
 They exercise the production renderers with a framebuffer double. OLED viewing
 angle, contrast and physical button behavior still need an on-device check.
+
+The shared `interface/ui_text.h` renderer offers top-left `draw` with scale1/2
+and a21-glyph maximum, plus cursor-based `print`. ASCII-only `print` preserves
+the caller's existing font, size and wrapping behavior. `interface/utf8_text.h`
+provides the display-independent alphabet validator and safe prefix sizing.
+The alphabet PGM preview and known Ж/Ё/ё pixel checks exercise the actual
+Russian bitmap data rather than substituting unsupported characters.

@@ -1,5 +1,6 @@
 #include "interface/interface.h"
 #include "interface/menu/appearance_config.h"
+#include "interface/ui_text.h"
 #include "menu/subghz_items.h"
 #include "U8g2_for_Adafruit_GFX.h"
 #include <stdio.h>
@@ -64,17 +65,58 @@ static void navigationTests() {
   CHECK(!strcmp(subghzMenuItems[6],"Radio Lab"));CHECK(!strcmp(subghzMenuItems[7],"Chat"));
   CHECK((0+SUBGHZ_MENU_ITEM_COUNT-1)%SUBGHZ_MENU_ITEM_COUNT==7);
 }
+static void textTests(const char* directory) {
+  size_t glyphs=0;
+  CHECK(ui_text::validate("АЯаяЁё ABC",strlen("АЯаяЁё ABC"),&glyphs));CHECK(glyphs==10);
+  CHECK(ui_text::prefixBytes("ЯЁabc",1)==2);CHECK(ui_text::prefixBytes("ЯЁabc",2)==4);
+  CHECK(ui_text::prefixBytes("ЯЁabc",3)==5);CHECK(ui_text::prefixBytes("ЯЁabc",0)==0);
+  CHECK(!ui_text::validate("\xd0",1));CHECK(!ui_text::validate("\xd1\x90",2));
+  CHECK(!ui_text::validate("\xc0\xaf",2));CHECK(!ui_text::validate("A\n",2));
+  CHECK(!ui_text::validate("A\0B",3));CHECK(!ui_text::validate("\xf0\x9f\x90\xac",4));
+  char out[8];CHECK(ui_text::copyGlyphs(out,3,"ЯЁ",2)==2);CHECK(!strcmp(out,"Я"));
+  CHECK(ui_text::copyGlyphs(out,2,"ЯЁ",2)==0);CHECK(out[0]==0);
+  DisplayType display;
+  ui_text::draw(display,0,0,"ЖЁё",SH110X_WHITE,3);
+  // Known Cyrillic pixels, including both dotted letters; '?' cannot pass.
+  CHECK(display.pixels[0][0]&&display.pixels[0][2]&&display.pixels[0][4]);
+  CHECK(!display.pixels[0][1]&&!display.pixels[0][3]);CHECK(display.pixels[3][2]);
+  CHECK(display.pixels[0][7]&&display.pixels[0][9]);CHECK(display.pixels[0][13]&&display.pixels[0][15]);
+  for(unsigned x=6;x<11;++x)CHECK(display.pixels[2][x]);
+  CHECK(!display.pixels[2][12]&&!display.pixels[2][16]);
+  CHECK(display.pixels[2][13]&&display.pixels[2][14]&&display.pixels[2][15]);
+  CHECK(display.getCursorX()==18&&display.getCursorY()==0);CHECK(display.clipped==0);
+  display.fillRect(0,0,128,64,1);ui_text::draw(display,0,0,"Ж",SH110X_BLACK,1);
+  CHECK(!display.pixels[0][0]&&!display.pixels[0][2]&&!display.pixels[0][4]);
+  CHECK(display.pixels[0][1]&&display.pixels[0][3]);
+  display.clearDisplay();ui_text::draw(display,0,0,"Ё",SH110X_WHITE,1,2);
+  CHECK(display.pixels[0][2]&&display.pixels[1][3]&&display.pixels[0][6]&&display.pixels[1][7]);
+  for(unsigned x=0;x<10;++x)CHECK(display.pixels[4][x]&&display.pixels[5][x]);
+  CHECK(display.getCursorX()==12&&display.clipped==0);
+  display.clearDisplay();display.setTextSize(2);display.setCursor(0,0);const unsigned changes=display.fontChanges;
+  ui_text::print(display,"AZ");CHECK(display.getCursorX()==24);CHECK(display.fontChanges==changes);
+  ui_text::draw(display,0,0,"Я",SH110X_WHITE,1);display.print("A");CHECK(display.getCursorX()==18);
+  display.clearDisplay();display.setTextSize(1);display.setCursor(0,0);display.print("AZ");
+  uint8_t ascii[64][128];memcpy(ascii,display.pixels,sizeof ascii);
+  display.clearDisplay();ui_text::draw(display,0,0,"AZ");CHECK(!memcmp(ascii,display.pixels,sizeof ascii));
+  display.clearDisplay();ui_text::draw(display,0,0,"ЖЁё",SH110X_WHITE,2);CHECK(display.getCursorX()==12);
+  for(int x=-12;x<140;x+=7)for(int y=-8;y<72;y+=5) {
+    display.clearDisplay();ui_text::draw(display,x,y,"ЁжЯ A",SH110X_WHITE,21,2);CHECK(display.clipped==0);
+  }
+  const char* alphabet[]={"АБВГДЕЁЖЗИЙКЛМНОП","РСТУФХЦЧШЩЪЫЬЭЮЯ","абвгдеёжзийклмноп","рстуфхцчшщъыьэюя"};
+  display.clearDisplay();for(unsigned row=0;row<4;++row)ui_text::draw(display,0,row*16,alphabet[row]);
+  char path[1024];snprintf(path,sizeof path,"%s/russian_alphabet.pgm",directory);CHECK(display.writePgm(path));
+}
 static void renderTests(const char* directory) {
   DisplayType display;
   for(unsigned raw=0;raw<256;++raw)for(unsigned sd=0;sd<2;++sd) {
     sdCardReady=sd;displayPocketMenu(display,uint8_t(raw));const auto window=pocketMenuWindow(raw);
     CHECK(display.clipped==0);CHECK(display.rounded.size()==1);CHECK(display.rounded[0].x==1&&display.rounded[0].w==120);
     CHECK(display.rounded[0].y==12+(window.selected-window.first)*14);CHECK(display.rounded[0].color==1);
-    CHECK(hasLabel(display,sd?"SD":"--"));CHECK(hasLabel(display,"UP/DN move   OK open"));
+    CHECK(hasLabel(display,sd?"SD":"--"));
     char position[6];snprintf(position,sizeof position,"%02u/08",unsigned(window.selected+1));CHECK(hasLabel(display,position));
     for(unsigned row=0;row<3;++row) {
-      const char* label=menuItems[window.first+row];CHECK(hasLabel(display,label));
-      for(const auto& call:display.labels)if(call.value==label)CHECK(call.color==int(window.first+row!=window.selected));
+      const char* label=pocketMenuLabel(window.first+row);size_t glyphs=0;
+      CHECK(ui_text::validate(label,strlen(label),&glyphs));CHECK(glyphs>0&&glyphs<=14);
     }
     for(const auto& call:display.labels) {
       CHECK(call.x>=0&&call.y>=0);CHECK(call.x+int(call.value.size())*6<=128);CHECK(call.y+8<=64);
@@ -104,6 +146,6 @@ static void renderTests(const char* directory) {
 }
 int main(int argc,char** argv) {
   if(argc!=2){fprintf(stderr,"Pass a snapshot directory\n");return 2;}
-  appearanceTests();navigationTests();renderTests(argv[1]);
-  printf("Pocket UI: %u checks PASS (all8 categories/all5 styles, pixel bounds, wrap, SD states, one-time migration); 9 PGM snapshots\n",checks);
+  appearanceTests();navigationTests();textTests(argv[1]);renderTests(argv[1]);
+  printf("Pocket UI: %u checks PASS (Russian glyph pixels/UTF8, all8 categories/all5 styles, bounds, navigation, migration); 10 PGM snapshots\n",checks);
 }

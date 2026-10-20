@@ -26,7 +26,7 @@ def run(build):
         command.append("c++")
     command += ["-std=c++11", "-Wall", "-Wextra", "-Werror", "-O1", "-g", "-DDISPLAY_TYPE=0",
                 "-I" + str(here), "-I" + str(root / "src"), "-include", str(here / "config_usage.h"),
-                str(here / "test_pocket.cpp")]
+                str(here / "test_pocket.cpp"),str(root / "src/interface/ui_text.cpp")]
     command += [str(root / "src/interface/menu" / name) for name in
                 ("pocket_menu.cpp", "list_menu.cpp", "pages_menu.cpp", "wii_menu.cpp", "dsi_menu.cpp")]
     command += [str(root / "src/interface/submenu" / name) for name in ("list_submenu.cpp", "roll_submenu.cpp")]

@@ -1,17 +1,20 @@
 #include "pocket_menu.h"
+#include "../ui_text.h"
 #include <stdio.h>
 
 extern const char* menuItems[];
 extern bool sdCardReady;
 
 namespace {
-void text(DisplayType& display, int16_t x, int16_t y, const char* value, uint8_t maximum) {
-  char clipped[22]; uint8_t count = 0;
-  while(value && value[count] && count < maximum) {
-    const unsigned char c = value[count]; clipped[count++] = c >= 32 && c <= 126 ? c : '?';
+void text(DisplayType& display, int16_t x, int16_t y, const char* value, uint8_t maximum,
+          uint16_t color=SH110X_WHITE) {
+  char clipped[64];
+  const size_t bytes=ui_text::copyGlyphs(clipped,sizeof clipped,value,maximum);
+  if(value&&value[bytes]&&maximum>=3) {
+    const size_t prefix=ui_text::copyGlyphs(clipped,sizeof clipped,value,maximum-3);
+    clipped[prefix]='.';clipped[prefix+1]='.';clipped[prefix+2]='.';clipped[prefix+3]=0;
   }
-  if(value && value[count] && count >= 3) clipped[count - 3] = clipped[count - 2] = clipped[count - 1] = '.';
-  clipped[count] = 0; display.setCursor(x, y); display.print(clipped);
+  ui_text::draw(display,x,y,clipped,color,maximum);
 }
 void prepareText(DisplayType& display) {
   display.setFont(nullptr); display.setTextSize(1); display.setTextWrap(false);
@@ -86,7 +89,7 @@ void listRow(DisplayType& display, int16_t y, const char* label, bool selected, 
   if(selected) display.fillRoundRect(1, y, 120, 13, 2, SH110X_WHITE);
   const uint16_t ink = selected ? SH110X_BLACK : SH110X_WHITE;
   icon(display, category, 4, y+1, ink);
-  display.setTextColor(ink); text(display, 22, y+3, label, 14);
+  display.setTextColor(ink); text(display, 22, y+3, label, 14, ink);
   if(selected) {
     display.drawLine(114, y+4, 117, y+6, ink); display.drawLine(117, y+6, 114, y+9, ink);
   }
@@ -97,18 +100,24 @@ void footer(DisplayType& display, const char* hint) {
 }
 }
 
+const char* pocketMenuLabel(uint8_t category) {
+  static const char* const labels[]={"Wi-Fi","Bluetooth","Радио SubGHz","Инфракрасный","Пины GPIO","Игры","Настройки","Приложения SD"};
+  static_assert(sizeof(labels)/sizeof(labels[0])==MAIN_MENU_ITEM_COUNT,"Every Pocket item needs a Russian label");
+  return labels[category%MAIN_MENU_ITEM_COUNT];
+}
+
 void displayPocketMenu(DisplayType& display, byte menuIndex) {
   const PocketMenuWindow window = pocketMenuWindow(menuIndex);
   display.clearDisplay();
   pocket_draw::header(display, "ESP-HACK", window.selected+1, MAIN_MENU_ITEM_COUNT, sdCardReady);
   for(uint8_t row=0; row<window.count; ++row) {
     const uint8_t category = window.first+row;
-    pocket_draw::listRow(display, 12+row*14, menuItems[category], category==window.selected, category);
+    pocket_draw::listRow(display, 12+row*14, pocketMenuLabel(category), category==window.selected, category);
   }
   display.drawFastVLine(125, 12, 41, SH110X_WHITE);
   const uint8_t thumbHeight = 41*window.count/MAIN_MENU_ITEM_COUNT;
   const uint8_t thumbY = 12+window.first*(41-thumbHeight)/(MAIN_MENU_ITEM_COUNT-window.count);
   display.fillRect(124, thumbY, 3, thumbHeight, SH110X_WHITE);
-  pocket_draw::footer(display, "UP/DN move   OK open");
+  pocket_draw::footer(display, "Вверх/вниз OK вход");
   display.display();
 }
