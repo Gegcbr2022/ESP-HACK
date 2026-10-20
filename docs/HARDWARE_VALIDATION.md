@@ -172,7 +172,7 @@ evidence that it has been installed or launched. Use `shared/chat_radio.h` and
 | Matching chat setting | Value |
 | --- | --- |
 | First test channel | 433920000 Hz, only when appropriate/permitted |
-| Modulation / rate | 2-FSK / 9595.87097 bit/s |
+| Modulation / rate | 2-FSK / 38383.48389 bit/s |
 | Deviation / RX bandwidth | 19042.96875 Hz / 101562.5 Hz |
 | Sync / preamble | D391, 30/32-bit qualifier / four bytes |
 | Packet mode | Variable length, maximum 60 data bytes |

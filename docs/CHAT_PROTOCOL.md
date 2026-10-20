@@ -13,7 +13,7 @@ The frequency registers are computed by each hardware HAL using the same
 | Parameter | Value |
 |---|---|
 | Modulation | 2-FSK, no Manchester |
-| Bit rate | 9595.87097bit/s (`MDMCFG4=CA`, `MDMCFG3=83`) |
+| Bit rate | 38383.48389bit/s (`MDMCFG4=CA`, `MDMCFG3=83`) |
 | Deviation | 19042.96875Hz (`DEVIATN=34`) |
 | RX bandwidth | 101562.5Hz |
 | Sync | D391, 30/32-bit qualification |

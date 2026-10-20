@@ -42,7 +42,7 @@ delivered, or failed status for the current outgoing message.
 1. Check local RF rules, antenna band, conducted/ERP power and test conditions.
    Use shielded or attenuated equipment where appropriate.
 2. Select the same frequency on ESP-HACK and Flipper. The shared profile is
-   2-FSK, 9595.87bit/s, 19.043kHz deviation, 101.5625kHz bandwidth and sync D391.
+   2-FSK, 38383.48bit/s, 19.043kHz deviation, 101.5625kHz bandwidth and sync D391.
 3. Both apps launch in receive-only mode. Enable permitted lab TX on each;
    ACKs require TX on the receiving device too. Frequency or power changes
    reset the Flipper TX opt-in.
