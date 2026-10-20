@@ -84,17 +84,66 @@ Controlled USB tests then used the Flipper's internal radio at 433.920 MHz:
 - Plain GFSK chat reception still failed: a controlled Flipper CLI send raised
   ESP RSSI to -48 dBm, but no sync/CRC-valid packet was accepted. The following
   USB-triggered ESP chat send hit a loopTask stack canary; that direction of
-  that attempt is invalid. Deferred serial UI dispatch was subsequently added
-  and requires the next device run.
+  that attempt is invalid. Deferred serial UI dispatch was subsequently added;
+  its successful final device run is recorded below.
 
 The attached Flipper identifies as Unleashed086e, commit `e7e4e179`. Its
 Enhanced Chat app uses the firmware's radio worker. This differs from the
 separately supplied official1.5.1/API88.2 companion FAP build target.
+
+## Final release 2 image and controlled two-way chat
+
+The final runtime source is `d63f1ca96d7af20b336cee8065ea862468adc343`.
+All four flash segments passed explicit esptool readback verification. The
+application image is **1,703,456 bytes**, SHA256
+`0759a2b353ef54feed546e7b24de061c9eb389f7da61f9fcfc808ff642a484fb`.
+The Windows target reports 118,872 static RAM bytes and 1,696,885 linked flash
+bytes; binary length also includes image metadata/padding. The manifest records
+the runtime source separately from subsequent documentation-only release commits.
+
+Controlled fine RX tests kept the Flipper at nominal433.920MHz. At ESP
+programming433.960/433.970/433.980MHz, valid packet frequency estimates were
++9,521/0/-9,521Hz. A measured, device-specific **+115ppm** correction was saved
+in its separate NVS namespace. It survived reset and was preserved by segment
+flashing. Other devices retain the firmware default0ppm; no correction is
+inferred automatically from noise or the short clock probe.
+
+An additional send blocker was corrected: the CC1101 hardware carrier flag
+remained asserted near the observed -88dBm background. Chat now uses cached RSSI
+and sync activity, with an automatic -75dBm host threshold. An active sync always
+blocks sending. The modem/wire profile, manual-send requirement, packet gap,
+deadlines and attempt budget remain unchanged.
+
+The final test used the **normal ESP chat UI and queue**, not its receive-only
+diagnostic, at nominal433.920MHz and PKTCTRL1=0C. The connected Flipper ran
+`subghz chat 433920000 0` on its internal radio:
+
+- Both distinct synthetic Flipper messages appeared byte-for-byte in the ESP
+  message snapshots. The ESP counted three CRC-valid packets, no CRC/FIFO/SPI
+  errors, and a zero last-packet frequency estimate.
+- One manually requested ESP message completed with TXcount1, and the Flipper
+  actually printed **ESP-HACK: TEST123**. This is peer reception evidence.
+- The test produced no panic or stack-canary error. A calibration-save request
+  while chat was active was rejected; the saved value remained115. Closing
+  chat restored the main menu.
+
+The CLI and installed Enhanced Chat share the verified Unleashed086e radio
+worker. This test establishes that controlled plaintext radio path in both
+directions. It does **not** constitute a test of the Enhanced GUI, encryption,
+long messages, range or the separate official1.5.1/API88.2 ESP ACK FAP.
+
+After this flash, all eleven installed Russian SD apps again passed **120
+input/tick/draw frames each** in the real Lua VM at240MHz. Self-test memory
+peaked at14,144/49,152 bytes; the largest app peaked at32,872/49,152 and the
+longest observed callback was4,982us. The final reboot loaded115ppm, mounted SD,
+reported PART00/VERSION14 with zero SPI/ready timeouts, and reached the Russian
+Pocket menu with120,280 free heap bytes. A fresh framebuffer capture verified
+the actual menu rendering.
 
 ## Physical checks still needed
 
 Serial boot and register observations establish startup and bus access. They
 do not establish OLED appearance or all button workflows, RF waveform timing,
 receiver sensitivity, antenna matching, calibrated power, spectrum behavior,
-or bidirectional chat with a physical Flipper beyond the finite OOK test above. Follow HARDWARE_VALIDATION.md
+or RF behavior beyond the finite OOK and controlled plaintext tests above. Follow HARDWARE_VALIDATION.md
 with a known transmitter/receiver and measurement equipment for those checks.
