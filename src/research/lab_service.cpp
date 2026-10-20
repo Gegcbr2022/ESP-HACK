@@ -5,6 +5,7 @@
 #include "radio_calibration.h"
 #include "trim_math.h"
 #include "chat_channel.h"
+#include "raw_radio_restore.h"
 #include "../CONFIG.h"
 #include "../../shared/chat_radio.h"
 #include "../../shared/chat_session.h"
@@ -12,6 +13,9 @@
 #include <Arduino.h>
 #include <ELECHOUSE_CC1101_SRC_DRV.h>
 #include <driver/rmt.h>
+#include <soc/gpio_struct.h>
+#include <soc/gpio_periph.h>
+#include <soc/soc.h>
 #include <esp_system.h>
 #include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
@@ -54,6 +58,102 @@ FlipperChatRx plaintextRx;
 FlipperChatTx plaintextTx;
 // At most 2048 pulses plus splits; 4096 half-items cover all <=5s waveforms.
 rmt_item32_t* rmtItems;
+
+void status(const char* text);
+void errorCount(uint32_t LabSnapshot::*field);
+uint8_t stableStatus(uint8_t address);
+
+struct RawRestoreBackend {
+    struct PinState { uint32_t mux, pin, outputSelect; bool enabled, high; };
+    bool installed=false;
+    static_assert(CC1101_GDO0<32,"RAW GPIO snapshot targets the original GPIO bank");
+    bool ready() const { return ELECHOUSE_cc1101.spiReady(); }
+    bool readState(uint8_t& value) {
+        const uint32_t before=ELECHOUSE_cc1101.spiTimeouts();
+        value=stableStatus(0x35)&0x1F;
+        return before!=UINT32_MAX && ELECHOUSE_cc1101.spiTimeouts()==before;
+    }
+    bool readReg(uint8_t address,uint8_t& value) {
+        const uint32_t before=ELECHOUSE_cc1101.spiTimeouts();
+        value=ELECHOUSE_cc1101.SpiReadReg(address);
+        const bool ok=before!=UINT32_MAX && ELECHOUSE_cc1101.spiTimeouts()==before;
+        if(ok) { portENTER_CRITICAL(&lock); state.registers[address]=value; portEXIT_CRITICAL(&lock); }
+        return ok;
+    }
+    bool writeReg(uint8_t address,uint8_t value) {
+        const uint32_t before=ELECHOUSE_cc1101.spiTimeouts();
+        ELECHOUSE_cc1101.SpiWriteReg(address,value);
+        return before!=UINT32_MAX && ELECHOUSE_cc1101.spiTimeouts()==before;
+    }
+    bool readPa(uint8_t* values) {
+        const uint32_t before=ELECHOUSE_cc1101.spiTimeouts();
+        ELECHOUSE_cc1101.SpiReadBurstReg(0x3E,values,8);
+        return before!=UINT32_MAX && ELECHOUSE_cc1101.spiTimeouts()==before;
+    }
+    bool writePa(const uint8_t* values) {
+        uint8_t copy[8];memcpy(copy,values,sizeof(copy));
+        const uint32_t before=ELECHOUSE_cc1101.spiTimeouts();
+        ELECHOUSE_cc1101.SpiWriteBurstReg(0x3E,copy,8);
+        return before!=UINT32_MAX && ELECHOUSE_cc1101.spiTimeouts()==before;
+    }
+    bool wait(uint8_t wanted) {
+        for(unsigned i=0;i<40;++i) {
+            uint8_t current;
+            if(!readState(current)) return false;
+            if(current==wanted) return true;
+            delay(1);
+        }
+        return false;
+    }
+    bool idle() {
+        const uint32_t before=ELECHOUSE_cc1101.spiTimeouts();
+        ELECHOUSE_cc1101.SpiStrobe(0x36);
+        return before!=UINT32_MAX && ELECHOUSE_cc1101.spiTimeouts()==before && wait(1);
+    }
+    bool enterRx() {
+        const uint32_t before=ELECHOUSE_cc1101.spiTimeouts();
+        ELECHOUSE_cc1101.SpiStrobe(0x3A);
+        ELECHOUSE_cc1101.SpiStrobe(0x34);
+        return before!=UINT32_MAX && ELECHOUSE_cc1101.spiTimeouts()==before && wait(13);
+    }
+    void savePin(PinState& value) {
+        value.mux=REG_READ(GPIO_PIN_MUX_REG[CC1101_GDO0]);
+        value.pin=GPIO.pin[CC1101_GDO0].val;
+        value.outputSelect=GPIO.func_out_sel_cfg[CC1101_GDO0].val;
+        value.enabled=(GPIO.enable&(1UL<<CC1101_GDO0))!=0;
+        value.high=(GPIO.out&(1UL<<CC1101_GDO0))!=0;
+    }
+    void safePin() { pinMode(CC1101_GDO0,INPUT); }
+    void restorePin(const PinState& value) {
+        const uint32_t mask=1UL<<CC1101_GDO0;
+        GPIO.enable_w1tc=mask;
+        if(value.high)GPIO.out_w1ts=mask;else GPIO.out_w1tc=mask;
+        GPIO.pin[CC1101_GDO0].val=value.pin;
+        GPIO.func_out_sel_cfg[CC1101_GDO0].val=value.outputSelect;
+        REG_WRITE(GPIO_PIN_MUX_REG[CC1101_GDO0],value.mux);
+        if(value.enabled)GPIO.enable_w1ts=mask;
+    }
+    bool stopRmt() {
+        if(!installed)return true;
+        const bool stopped=rmt_tx_stop(RMT_CHANNEL_0)==ESP_OK;
+        const bool released=rmt_driver_uninstall(RMT_CHANNEL_0)==ESP_OK;
+        installed=false;
+        return stopped&&released;
+    }
+    void restored(bool ok) {
+        if(!ok) { errorCount(&LabSnapshot::spiErrors); status("Radio restore failed; RX stopped"); }
+    }
+};
+
+struct RawSoftwareRestore {
+    const RadioSettings settings=activeSettings;
+    const bool stopping=stopRequested, seen=syncSeen;
+    const uint32_t armed=rxArmedAt, started=syncStarted;
+    ~RawSoftwareRestore() {
+        activeSettings=settings;stopRequested=stopping;
+        rxArmedAt=armed;syncStarted=started;syncSeen=seen;
+    }
+};
 
 void status(const char* text) {
     portENTER_CRITICAL(&lock);
@@ -585,10 +685,15 @@ bool labTransmitRaw(const int32_t* pulses, size_t count, const RegisterImage& im
         for(size_t i = 2; i < 8; ++i) if(image.pa[i]) return false;
     }
     if(image.present[0x22] && (image.value[0x22] & 7) != 1) return false;
-    activeSettings.frequencyHz = hz;
+    RawSoftwareRestore software;
+    RawRestoreBackend backend;
+    RawRadioRestore<RawRestoreBackend> restore(backend);
+    if(!restore.capture()) { status("RAW requires a readable stable RX/IDLE radio"); return false; }
     stopRequested = false;
+    restore.mutating(); // Every later exit restores the physical snapshot.
     if(!configure(image, hz) || !idle()) return false;
     powerTable(hz, powerIndex, true);
+    if(!ELECHOUSE_cc1101.spiReady()) { status("RAW power SPI write failed"); return false; }
     if(!rmtItems)rmtItems=static_cast<rmt_item32_t*>(heap_caps_calloc(2048,sizeof(rmt_item32_t),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
     if(!rmtItems){status("No RAM for RMT bank");return false;}
     memset(rmtItems, 0, 2048*sizeof(rmt_item32_t)); size_t h = 0;
@@ -605,6 +710,7 @@ bool labTransmitRaw(const int32_t* pulses, size_t count, const RegisterImage& im
     rmt_config_t r = RMT_DEFAULT_CONFIG_TX(gpio_num_t(CC1101_GDO0), RMT_CHANNEL_0);
     r.clk_div = 80; r.mem_block_num = 2; r.tx_config.idle_output_en = true; r.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
     if(rmt_config(&r) != ESP_OK || rmt_driver_install(RMT_CHANNEL_0, 0, 0) != ESP_OK) return false;
+    backend.installed=true;
     ELECHOUSE_cc1101.SpiStrobe(0x35);
     bool ok = waitState(19, 40); const uint32_t start = micros();
     if(ok) ok = rmt_write_items(RMT_CHANNEL_0, rmtItems, (h + 1) / 2, false) == ESP_OK;
@@ -612,14 +718,14 @@ bool labTransmitRaw(const int32_t* pulses, size_t count, const RegisterImage& im
         const esp_err_t result=rmt_wait_tx_done(RMT_CHANNEL_0,0);
         if(result==ESP_OK)break;
         if(result!=ESP_ERR_TIMEOUT){ok=false;rmt_tx_stop(RMT_CHANNEL_0);break;}
-        if(digitalRead(BUTTON_BACK) == LOW || uint32_t(micros() - start) > limitMs * 1000) {
+        if(stopRequested || digitalRead(BUTTON_BACK) == LOW || uint32_t(micros() - start) > limitMs * 1000) {
             rmt_tx_stop(RMT_CHANNEL_0); ok = false; break;
         }
         delay(1);
     }
     elapsedUs = micros() - start; timingErrorUs = int64_t(elapsedUs) - int64_t(total);
     // Wall completion includes task polling latency; this is NOT measured edge jitter.
-    rmt_driver_uninstall(RMT_CHANNEL_0); idle(); pinMode(CC1101_GDO0, INPUT);
-    return ok;
+    const bool restored=restore.finish();
+    return ok && restored;
 }
 }
