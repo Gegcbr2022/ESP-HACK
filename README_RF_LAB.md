@@ -112,17 +112,19 @@ The user confirmed failed reception in both ESP32/Flipper directions on the
 Russian `c5779ee` build. The connected peer is Unleashed `unlshd-086e`
 (`e7e4e179`); its backed-up Enhanced Sub-Ghz Chat 1.2 uses API 87.6 and delegates
 the radio worker to that firmware. Source/profile checks have not established
-the physical cause. Later controlled valid-CRC one-way reception required a
-device-specific frequency offset; calibrated bidirectional delivery remains
-pending. The supplied ESP ACK companion
+the physical cause. The final `d63f1ca` image passed controlled plaintext
+exchange in both directions between its normal chat UI and the installed
+Flipper's internal-radio CLI at nominal 433.920 MHz, with the ESP32's saved
++115 ppm correction. Enhanced Chat's GUI itself was not tested. The supplied ESP ACK companion
 FAP built for official 1.5.1/API 88.2 is a separate application.
 
 All eleven Russian SD apps passed 120 diagnostic input/tick/draw frames each on
-the `c5779ee` ESP32 build with radio starts disabled. Its three-job CI run also
+the final `d63f1ca` ESP32 build with radio starts disabled. The earlier `c5779ee` CI run also
 passed. The `e23c31d` diagnostic candidate was verified flashed and yielded the
 one-way RF result. All three CI jobs passed at `28e4d46`, including full-path
 browsing and per-device calibration. All three jobs also passed at `d63f1ca`,
-including its carrier-gate change; final bidirectional device results remain pending. Earlier
+including its carrier-gate change. All four final flash segments verified and
+the controlled normal-UI/Flipper-CLI two-way test passed. Earlier
 release 1 evidence and exact source states are separated in the test report.
 
 ## Build, test, flash and rollback
@@ -158,3 +160,5 @@ may retain English labels. Filenames and protocol identifiers are not translated
 Compiled/native-tested behavior is distinct from physical RF validation. A
 successful flash, chip probe or OLED boot cannot establish receiver sensitivity,
 accurate RF timing or ESP32 ↔ Flipper interoperability.
+The controlled plaintext pair above is an observed exception with narrow
+conditions: Enhanced GUI, ESP ACK/FAP, range, RF power and encryption were not tested.

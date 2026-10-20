@@ -8,8 +8,10 @@ Release 1 artifact/device evidence is explicitly historical. The Russian
 still failed both physical directions. A verified later `e23c31d` image received
 controlled Flipper packets with valid CRC at an adjusted programmed receive
 frequency. All three CI jobs passed at `28e4d46` and the subsequent `d63f1ca`
-carrier-gate change. Final physical two-way sign-off remains pending;
-earlier results are not generalized to that image.
+carrier-gate change. The final `d63f1ca` image passed controlled two-way
+plaintext exchange between the normal ESP32 chat UI and the installed
+Flipper's internal-radio CLI. Enhanced Chat's GUI itself was not tested;
+the result does not establish general RF performance or ESP ACK/FAP delivery.
 
 ## Build results
 
@@ -22,7 +24,7 @@ earlier results are not generalized to that image.
 | Russian release 2 source `c5779ee`: Pocket/settings, static Send, simple chat and eleven apps | PASS build/CI; device app checks recorded below | Linux SH1106 CI linked and uploaded its firmware; all eleven Russian SD apps passed 120 diagnostic frames each on the ESP32 build. Physical chat still failed both directions. The release owner's image manifest identifies the separately built device binary |
 | Intermediate image `e23c31d` | Verified flashed; controlled one-way RX PASS | Valid-CRC Flipper-to-ESP32 packets at adjusted programmed RX frequency; final calibrated two-way exchange was not established by this test |
 | Source `28e4d46`: complete-path pagination, reference-clock probe, UART diagnostics and device calibration | PASS native / ESP32 / Flipper CI | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,605 flash bytes (86.3%); both target artifacts uploaded. Final device evidence is recorded separately |
-| Later source `d63f1ca`: host carrier-gate correction | PASS native / ESP32 / Flipper CI; final device sign-off pending | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,629 flash bytes (86.3%); both target artifacts uploaded. Host gate uses cached RSSI/sync state and selected threshold; shared MCSM1 wire profile is unchanged. This row does not claim peer reception |
+| Final source `d63f1ca`: host carrier-gate correction | PASS native / ESP32 / Flipper CI and controlled device tests | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,629 flash bytes (86.3%); both target artifacts uploaded. Separately built device application 1,703,456 bytes, all four segments verified; normal-UI/Flipper-CLI plaintext exchange passed both directions, as detailed below |
 | Companion Flipper chat FAP (previous checked source) | PASS | uFBT 0.2.6, official firmware/SDK 1.5.1, target 7 / API 88.2; actual `.fap` produced and strict import check passed |
 
 The official Flipper source reference is
@@ -217,16 +219,41 @@ The release owner subsequently recorded normal-UI reception of three
 valid-CRC packets, zero frequency-error estimate and persistence of the local
 +115 ppm NVS correction, without a panic. A separate carrier-busy host gate
 blocked ESP32 transmission under background carrier indication; `d63f1ca`
-changes that host gate and is awaiting final bidirectional testing.
+changes that host gate; the final test below then passed both directions.
 
-### Final device sign-off remains separate
+### Final `d63f1ca` device sign-off
 
-The release owner will append the final application size/hash, matching flash
-verification, boot state, saved-correction readback, paginated SD workflow and
-two-way RF result. The 246 clock tests above use mocks and must not be reported
-as a measured crystal. Earlier app/CI results do not identify a later device
-image. RF edge jitter and calibrated RF/power remain unmeasured here. Follow
-`HARDWARE_VALIDATION.md` and retain failed attempts.
+The separately built final application was 1,703,456 bytes, SHA256
+`0759a2b353ef54feed546e7b24de061c9eb389f7da61f9fcfc808ff642a484fb`.
+All four flashed segments passed explicit verification. The boot reported
+120,280 free heap bytes, CC1101 PART00 / VERSION14 and zero SPI errors.
+The device-local +115 ppm correction persisted through reset; an attempted
+save while the radio was busy was blocked.
+
+The **normal ESP32 chat UI**, using nominal 433.920 MHz and PKTCTRL1=0C,
+received two controlled exact-text messages from the installed Flipper's CLI
+with its internal radio selected (device 0); both appeared in ESP32's last
+received text. The receiver recorded three valid packets, zero CRC errors
+and FREQEST 0. A normal manual ESP32 `TEST123` send completed with TX count 1,
+and the Flipper CLI actually printed `ESP-HACK: TEST123`. This is observed
+two-way plaintext reception, beyond a local TX-complete indication. No panic
+occurred, and chat close restored the main menu.
+
+The peer CLI uses the exact installed `e7e4e179` firmware worker imported by
+Enhanced Chat. **Enhanced Chat's graphical application itself was not tested**
+in this final exchange. The result covers this controlled pair and saved
+device correction; it does not establish range, calibrated RF frequency or
+power, sensitivity, encryption, ESP ACK/companion-FAP delivery, or arbitrary
+third-party `.sub` playback.
+
+All **eleven final installed Russian Lua apps passed 120 diagnostic frames
+each** with radio starts disabled. Maximum reported app allocation was
+32,872/49,152 bytes; the longest reported callback was 4,982 us. This exercises
+the real VM and installed samples, without claiming every interactive state
+or RF dashboard reception. The 246 clock tests remain hardware mocks, not a
+measured crystal. RF edge jitter and calibrated RF/power remain unmeasured.
+See the device-operation record and `HARDWARE_VALIDATION.md` for the narrow
+test conditions and retained failed attempts.
 
 See [Pocket UI](POCKET_UI.md), [SD utilities](SD_UTILITIES.md) and
 [SD games](SD_GAMES.md) for controls and limits.
