@@ -18,6 +18,14 @@ static RawTraceEntry traceStorage[4096];
 static RawTraceEntry* rawTraceBank;
 static const size_t kRawTraceCapacity=4096;
 static RawTrace rawTrace;
+static capture_history::History rawHistory;
+static int32_t historyStorage[capture_history::kBankPulses],captureStorage[kWaveformCapacity];
+static int32_t* rawHistoryBank;
+static int32_t* capture=captureStorage;
+static RegisterImage activeImage,rawHistoryImages[capture_history::kSlots];
+static RadioSettings rawHistorySettings[capture_history::kSlots];
+static uint32_t rawHistoryDuplicates,rawHistoryDiscarded;
+static bool activeRawHistory,historyCandidateStored;
 static void* workerHandle;
 static unsigned traceAllocations,traceFrees;
 static bool failTraceAllocation;
@@ -26,7 +34,8 @@ static void* heap_caps_malloc(size_t bytes,int caps) {
     ++traceAllocations;CHECK(bytes==sizeof(traceStorage));CHECK(caps==(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
     return failTraceAllocation?nullptr:traceStorage;
 }
-static void heap_caps_free(void* pointer){CHECK(pointer==traceStorage);++traceFrees;}
+static unsigned historyFrees;
+static void heap_caps_free(void* pointer){CHECK(pointer==traceStorage||pointer==historyStorage);if(pointer==traceStorage)++traceFrees;else ++historyFrees;}
 static RadioSettings activeSettings;
 static size_t captured;
 static bool stopRequested;
@@ -34,6 +43,7 @@ static uint32_t clockUs;
 static unsigned rssiSamples,failSample,stopSample,delayUs=1000;
 static int16_t noise=-88;
 static bool edgeDuringRssi,edgeAfterTime;
+static const unsigned CC1101_GDO0=4;
 static std::string lastStatus;
 struct Driver {bool ready=true;bool spiReady()const{return ready;}}ELECHOUSE_cc1101;
 struct Pulse {int32_t duration;uint32_t ended;};
@@ -44,6 +54,8 @@ namespace research { namespace raw_capture {
 bool pop(int32_t& duration,uint32_t& ended){if(pending.empty())return false;duration=pending.front().duration;ended=pending.front().ended;pending.pop_front();return true;}
 bool pop(int32_t& duration){uint32_t ended;return pop(duration,ended);}
 Snapshot snapshot(){Snapshot result=raw;result.queued=uint16_t(pending.size());return result;}
+void stop(){raw.running=false;}
+bool start(uint8_t pin){CHECK(pin==CC1101_GDO0);pending.clear();raw=Snapshot{};raw.running=true;raw.startedUs=raw.lastEdgeUs=clockUs;return true;}
 }}
 static void status(const char* text){lastStatus=text;}
 static void errorCount(uint32_t LabSnapshot::*field){++(state.*field);}
@@ -53,6 +65,7 @@ static uint32_t micros(){
     return result;
 }
 static void vTaskDelay(unsigned ticks){clockUs+=ticks*delayUs;}
+static uint32_t millis(){return clockUs/1000;}
 static int16_t sampleRawRssi(){
     ++rssiSamples;++state.samples;state.rssiDbm=noise;
     if(failSample&&rssiSamples==failSample)ELECHOUSE_cc1101.ready=false;
@@ -69,6 +82,8 @@ static void reset(){
     pending.clear();raw=raw_capture::Snapshot{};raw.running=true;
     rawTraceBank=traceStorage;rawTrace.bind(traceStorage,kRawTraceCapacity);rawTrace.enable(true);
     workerHandle=nullptr;traceAllocations=traceFrees=0;failTraceAllocation=false;
+    rawHistory.unbind();rawHistoryBank=nullptr;rawHistoryDuplicates=rawHistoryDiscarded=historyFrees=0;
+    activeRawHistory=historyCandidateStored=false;activeImage=RegisterImage();
 }
 static void prepareTriggered(TriggeredCapture& trigger){
     // The initial interval is partial;20 actual intervals follow the gate.
@@ -158,6 +173,58 @@ int main(){
     rawTrace.record(1,6000,6000,1,1,1,false,true);CHECK(labRawTraceCopy(4095,entry)&&entry.value==5000);
     CHECK(labRawTraceEnable(true));CHECK(labRawTraceInfo().count==0&&!labRawTraceInfo().frozen);
     CHECK(labRawTraceRelease()&&traceFrees==2&&!labRawTraceCopy(0,entry));
+
+    // Execute the production history retention and stopped-copy functions,
+    // not merely the separately tested portable deduplication model.
+    reset();CHECK(labRawTraceRelease());rawHistoryBank=historyStorage;
+    CHECK(rawHistory.bind(historyStorage,capture_history::kBankPulses));activeRawHistory=true;
+    activeImage.set(0x0B,0x55);activeSettings.frequencyHz=433920000;state.peakDbm=-26;
+    TriggeredCapture retained(capture,kWaveformCapacity,-75,0);prepareTriggered(retained);retained.poll(13100);CHECK(retained.complete());
+    CHECK(!retainRawCandidate(retained,0,false));CHECK(state.captureHistoryCount==1&&historyCandidateStored);
+    int32_t selected[2048]={};RegisterImage selectedImage;RadioSettings selectedSettings;
+    workerHandle=historyStorage;CHECK(!labCopyCaptureHistory(0,selected,2048,selectedImage,selectedSettings));CHECK(!labClearCaptureHistory());workerHandle=nullptr;
+    CHECK(!labCopyCaptureHistory(0,selected,19,selectedImage,selectedSettings));CHECK(!labCopyCaptureHistory(4,selected,2048,selectedImage,selectedSettings));
+    CHECK(labCopyCaptureHistory(0,selected,2048,selectedImage,selectedSettings)==20);
+    CHECK(selected[0]==300&&selectedImage.value[0x0B]==0x55&&selectedSettings.frequencyHz==433920000);
+    capture[0]=999;CHECK(selected[0]==300&&rawHistory.pulses(0)[0]==300);
+    TriggeredCapture repeated(capture,kWaveformCapacity,-75,0);prepareTriggered(repeated);repeated.poll(13100);activeImage.set(0x0B,0x66);state.peakDbm=-20;
+    CHECK(!retainRawCandidate(repeated,0,false));CHECK(state.captureHistoryCount==1&&state.captureHistoryDuplicates==1);
+    CHECK(state.captureHistory[0].observations==2&&state.captureHistory[0].rssiDbm==-20);
+    CHECK(labCopyCaptureHistory(0,selected,2048,selectedImage,selectedSettings)==20&&selectedImage.value[0x0B]==0x55);
+    // Pause after20 qualified ended intervals while RF remains strong: this
+    // is only a prefix of a24-bit frame, never a second completed history slot.
+    TriggeredCapture prefix(capture,kWaveformCapacity,-75,0);prepareTriggered(prefix);
+    historyCandidateStored=false;clockUs=6200;
+    CHECK(prefix.phase()==TriggeredCapture::Phase::Capturing&&prefix.postTriggerPulses()==20&&prefix.rssiQualified());
+    stopRawCandidate(prefix,raw_capture::snapshot());
+    CHECK(!prefix.complete()&&!state.captureComplete&&state.captureHistoryCount==1&&state.captureHistoryDiscarded==1);
+    CHECK(rawHistory.pulses(0)[0]==300&&rawHistory.entry(0)->observations==2);
+    CHECK(labCopyCaptureHistory(0,selected,2048,selectedImage,selectedSettings)==20&&selectedImage.value[0x0B]==0x55);
+    // The existing advanced single/manual workflow retains its deliberate
+    // qualified-prefix semantics, without adding anything to history.
+    TriggeredCapture manual(capture,kWaveformCapacity,-75,0);prepareTriggered(manual);
+    activeRawHistory=false;stopRawCandidate(manual,raw_capture::snapshot());
+    CHECK(manual.complete()&&state.captureComplete&&state.captureHistoryCount==1&&state.captureHistoryDiscarded==1);
+    activeRawHistory=true;
+    TriggeredCapture corrupt(capture,kWaveformCapacity,-75,0);prepareTriggered(corrupt);corrupt.pulse(0,6200);
+    CHECK(!retainRawCandidate(corrupt,0,false));CHECK(state.captureHistoryCount==1&&state.captureHistoryDiscarded==2);
+    CHECK(rawHistory.pulses(0)[0]==300&&rawHistory.entry(0)->observations==2);
+    for(unsigned slot=1;slot<4;++slot){
+        TriggeredCapture next(capture,kWaveformCapacity,-75,0);prepareTriggered(next);next.poll(13100);
+        activeSettings.frequencyHz=433920000+slot;activeImage.set(0x0B,uint8_t(0x60+slot));
+        CHECK(!retainRawCandidate(next,0,false));CHECK(state.captureHistoryCount==slot+1);
+    }
+    CHECK(state.captureHistoryFull&&rawHistory.size()==4);
+    CHECK(labCopyCaptureHistory(3,selected,2048,selectedImage,selectedSettings)==20&&selectedSettings.frequencyHz==433920003&&selectedImage.value[0x0B]==0x63);
+    CHECK(!labRawTraceEnable(true));CHECK(labClearCaptureHistory()&&historyFrees==1&&!rawHistoryBank&&!state.captureHistoryCount);
+    CHECK(selected[0]==300&&selectedSettings.frequencyHz==433920003&&!labCopyCaptureHistory(0,selected,2048,selectedImage,selectedSettings));
+    for(int16_t floor:{int16_t(-88),int16_t(-26)}){
+        reset();noise=floor;activeSettings.rssiThresholdDbm=-75;
+        CHECK(waitRawHistoryBoundary(0));CHECK(clockUs>=7000&&clockUs<20000);
+    }
+    reset();activeSettings.rxTimeoutMs=5;CHECK(!waitRawHistoryBoundary(0));CHECK(clockUs<10000);
+    reset();stopSample=2;CHECK(!waitRawHistoryBoundary(0)&&stopRequested);
+    reset();failSample=2;CHECK(!waitRawHistoryBoundary(0)&&!ELECHOUSE_cc1101.spiReady());
 
     std::printf("RAW worker: %u checks passed (real startup/drain/tick/publish, SPI-overlap IRQ and policy doubles)\n",checks);
 }

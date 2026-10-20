@@ -14,7 +14,7 @@ compiler=args.compiler or shutil.which('g++') or shutil.which('clang++') or shut
 if not compiler:parser.error('Use --compiler with a native C++ compiler')
 source=(root/'src/research/lab_service.cpp').read_text(encoding='utf-8')
 def function(name):
-    match=re.search(r'^(?:void|bool|RawTraceInfo) '+name+r'\([^\n]*\) \{',source,re.M)
+    match=re.search(r'^(?:void|bool|size_t|RawTraceInfo) '+name+r'\([^;]*?\) \{',source,re.M)
     if not match:raise RuntimeError('Production function absent: '+name)
     opening=source.index('{',match.start());depth=0
     for token in re.finditer(r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|//[^\n]*|/\*.*?\*/|[{}]',source[opening:],re.S):
@@ -24,6 +24,7 @@ def function(name):
             if not depth:return source[match.start():opening+token.end()]
     raise RuntimeError('Unclosed function '+name)
 production='\n\n'.join(function(name) for name in ('traceRaw','freezeRawTrace','publishRaw','drainRaw','rawCaptureTick','prepareRawThreshold',
+    'publishCaptureHistory','restartRawCandidate','waitRawHistoryBoundary','retainRawCandidate','stopRawCandidate','labCopyCaptureHistory','labClearCaptureHistory',
     'labRawTraceEnable','labRawTraceInfo','labRawTraceCopy','labRawTraceRelease'))
 production='namespace research {\n'+production+'\n}\n'
 template=(root/'tests/raw_worker_mock/worker_test.cpp').read_text(encoding='utf-8')
