@@ -31,6 +31,7 @@ struct RadioPreset {
 
 struct RadioSettings {
     uint32_t frequencyHz;
+    uint32_t realizedFrequencyHz; // Quantized synthesizer result; frequencyHz stays nominal.
     Modulation modulation;
     PacketFormat packetFormat;
     double bandwidthHz;

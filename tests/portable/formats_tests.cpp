@@ -87,8 +87,9 @@ static bool testSettings() {
     for(unsigned i=0;i<sizeof edges/sizeof edges[0];++i) {
         requested = RadioSettings(); requested.frequencyHz = edges[i];
         CHECK(encodeRadioSettings(requested,image,&actual));
-        CHECK(supportedFrequency(actual.frequencyHz));
-        CHECK(actual.frequencyHz > edges[i]-400 && actual.frequencyHz < edges[i]+400);
+        CHECK(actual.frequencyHz == edges[i]);
+        CHECK(supportedFrequency(actual.realizedFrequencyHz));
+        CHECK(actual.realizedFrequencyHz > edges[i]-400 && actual.realizedFrequencyHz < edges[i]+400);
     }
     requested = RadioSettings(); requested.packetFormat = PacketFormat::Async;
     requested.crc = false; requested.syncMode = 0;
@@ -235,6 +236,32 @@ static bool testFixtures(const char* directory) {
     }
     return true;
 }
+static bool testPresetMetadata() {
+    const Modulation mods[] = {Modulation::AskOok,Modulation::Fsk2,Modulation::Gfsk,Modulation::Fsk4,Modulation::Msk};
+    for(unsigned i=0;i<5;++i) {
+        RadioSettings requested,actual,restored; RegisterImage image;
+        requested.modulation=mods[i]; requested.dataRateBaud=mods[i]==Modulation::Msk?100000:9600;
+        requested.rssiThresholdDbm=-105; requested.rxTimeoutMs=123456; requested.txLimitMs=3000;
+        CHECK(encodeRadioSettings(requested,image,&actual));
+        CHECK(actual.frequencyHz==433920000UL); CHECK(actual.realizedFrequencyHz==433919830UL);
+        std::string text; CHECK(writePresetMetadata(append,&text,image,actual));
+        SubParser parser; CHECK(parser.feed(text.data(),text.size())); CHECK(parser.finish());
+        CHECK(parser.info().kind==SubKind::Key); CHECK(!parser.info().raw.pulses); CHECK(parser.info().hostFields==7);
+        CHECK(settingsFromSub(parser.info(),restored));
+        CHECK(restored.frequencyHz==actual.frequencyHz); CHECK(restored.modulation==actual.modulation);
+        CHECK(restored.packetFormat==actual.packetFormat); CHECK(restored.crc==actual.crc);
+        CHECK(restored.rssiThresholdDbm==-105); CHECK(restored.rxTimeoutMs==123456); CHECK(restored.txLimitMs==3000);
+        CHECK(!memcmp(parser.info().radio.value,image.value,sizeof image.value));
+        CHECK(!memcmp(parser.info().radio.present,image.present,sizeof image.present));
+        CHECK(!memcmp(parser.info().radio.pa,image.pa,sizeof image.pa));
+    }
+    CHECK(parse(std::string(header)+"X-ESP-RSSI: -100\nX-ESP-RX-timeout: 30000\nX-ESP-TX-limit: 1000\nRAW_Data: 1 -1\n"));
+    CHECK(parse(std::string(header)+"RAW_Data: 1 -1\nX-ESP-RSSI: -100\n",SubError::InvalidMetadata));
+    CHECK(parse(std::string(header)+"X-ESP-RSSI: 1\n",SubError::InvalidMetadata));
+    CHECK(parse(std::string(header)+"X-ESP-RX-timeout: 0\n",SubError::InvalidMetadata));
+    CHECK(parse(std::string(header)+"X-ESP-TX-limit: 10001\n",SubError::InvalidMetadata));
+    return true;
+}
 static bool testAdversarial() {
     // Deterministic mutations exercise bounded tokens, header duplicates and binary junk.
     // This is not a proof of memory safety or a substitute for on-hardware timing tests.
@@ -255,7 +282,7 @@ static bool testAdversarial() {
 }
 int main(int argc,char** argv) {
     if(!testPresets() || !testSettings() || !testMalformedPresets() || !testParser() || !testWriter() ||
-       (argc>1 && !testFixtures(argv[1])) || !testAdversarial()) return 1;
+       !testPresetMetadata() || (argc>1 && !testFixtures(argv[1])) || !testAdversarial()) return 1;
     printf("formats portable tests: %u checks passed (including 20000 deterministic mutations)\n",checks);
     return 0;
 }

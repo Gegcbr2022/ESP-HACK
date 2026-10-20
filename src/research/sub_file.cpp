@@ -8,7 +8,7 @@ namespace {
 enum Fields {
     FiletypeField=1, VersionField=2, FrequencyField=4, PresetField=8,
     ModuleField=16, CustomField=32, ProtocolField=64, BitField=128,
-    TeField=256, KeyField=512
+    TeField=256, KeyField=512, RssiField=1024, RxDeadlineField=2048, TxDeadlineField=4096
 };
 const uint16_t required = FiletypeField | VersionField | FrequencyField | PresetField | ProtocolField;
 bool space(char c) { return c == ' ' || c == '\t'; }
@@ -70,7 +70,8 @@ void RawStatistics::add(int32_t pulse) {
     if(duration >= 10000) ++gaps;
 }
 SubInfo::SubInfo() : kind(SubKind::Unknown), frequencyHz(0), version(0), bits(0), teUs(0),
-                     keyBytes(0), rawCompatible(false) {
+                     keyBytes(0), rawCompatible(false), hostFields(0), rssiThresholdDbm(-90),
+                     rxTimeoutMs(5000), txLimitMs(1000) {
     preset[0] = protocol[0] = module[0] = 0;
     memset(key, 0, sizeof key);
 }
@@ -216,6 +217,22 @@ bool SubParser::field() {
         size_t length;
         if(!hexBytes(value, info_.key, sizeof info_.key, length)) return fail(SubError::InvalidMetadata);
         info_.keyBytes = uint8_t(length);
+    } else if(!strcmp(name, "X-ESP-RSSI")) {
+        if(!claim(RssiField)) return false;
+        const bool negative = *value == '-';
+        if(negative) ++value;
+        if(!decimal(value, number) || number > (negative ? 130U : 0U)) return fail(SubError::InvalidMetadata);
+        info_.rssiThresholdDbm = negative ? -int16_t(number) : 0; info_.hostFields |= 1;
+    } else if(!strcmp(name, "X-ESP-RX-timeout")) {
+        if(!claim(RxDeadlineField)) return false;
+        if(!decimal(value, info_.rxTimeoutMs) || !info_.rxTimeoutMs || info_.rxTimeoutMs > 3600000UL)
+            return fail(SubError::InvalidMetadata);
+        info_.hostFields |= 2;
+    } else if(!strcmp(name, "X-ESP-TX-limit")) {
+        if(!claim(TxDeadlineField)) return false;
+        if(!decimal(value, info_.txLimitMs) || !info_.txLimitMs || info_.txLimitMs > 10000UL)
+            return fail(SubError::InvalidMetadata);
+        info_.hostFields |= 4;
     }
     // Protocol-specific extension fields are inspected but never decoded/replayed here.
     return true;
@@ -274,6 +291,36 @@ const char* SubParser::errorText() const {
     case SubError::InvalidMetadata: return "File type/protocol/key metadata mismatch";
     }
     return "Unknown parser error";
+}
+
+bool settingsFromSub(const SubInfo& info, RadioSettings& settings, const char** error) {
+    RadioSettings result;
+    if(!describeRadio(info.radio, info.frequencyHz, result, error)) return false;
+    if(info.hostFields & 1) result.rssiThresholdDbm = info.rssiThresholdDbm;
+    if(info.hostFields & 2) result.rxTimeoutMs = info.rxTimeoutMs;
+    if(info.hostFields & 4) result.txLimitMs = info.txLimitMs;
+    settings = result;
+    return true;
+}
+bool writePresetMetadata(TextSink sink, void* context, const RegisterImage& image, const RadioSettings& settings) {
+    if(!sink || !validateSettings(settings)) return false;
+    uint8_t bytes[kMaxPresetBytes];
+    const size_t length = encodeCustomPreset(image, bytes, sizeof bytes);
+    if(!length) return false;
+    char header[256];
+    snprintf(header, sizeof header,
+        "Filetype: Flipper SubGhz Key File\nVersion: 1\nFrequency: %lu\n"
+        "Preset: FuriHalSubGhzPresetCustom\nCustom_preset_module: CC1101\n"
+        "X-ESP-RSSI: %d\nX-ESP-RX-timeout: %lu\nX-ESP-TX-limit: %lu\nCustom_preset_data: ",
+        (unsigned long)settings.frequencyHz, int(settings.rssiThresholdDbm),
+        (unsigned long)settings.rxTimeoutMs, (unsigned long)settings.txLimitMs);
+    if(!sink(context, header, strlen(header))) return false;
+    for(size_t i=0;i<length;++i) {
+        char token[4]; snprintf(token,sizeof token,"%02X%c",bytes[i],i+1==length?'\n':' ');
+        if(!sink(context,token,3)) return false;
+    }
+    const char protocol[] = "Protocol: ESPHackPreset\n";
+    return sink(context,protocol,sizeof protocol-1);
 }
 
 RawWriter::RawWriter(TextSink sink, void* context)

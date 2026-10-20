@@ -10,6 +10,7 @@ The bounded parser follows the official [Flipper SubGhz file format](https://dev
 | Validated custom FIFO preset with RAW timings | Metadata and statistics; `rawCompatible=false` | Rejected by RAW writer | Unsupported RAW playback |
 | Version 1 Key + a known preset | Protocol name, `Bit`, `Key` up to 8 bytes, `TE` | Not implemented in this module | Metadata only; no automatic replay or universal protocol decoder |
 | Unknown Key protocol | Protocol metadata retained | Not implemented | No decoder implied |
+| ESPHackPreset Key metadata | Custom register image and host RSSI/deadlines | `writePresetMetadata()` supports FIFO and async settings | Configuration storage only; not a generic Flipper protocol decoder |
 | Unknown preset/module | Clear unsupported error | Rejected | No substitution |
 | BIN_RAW, other versions, unsupported packet formats | Clear unsupported error | Rejected | Not implemented |
 
@@ -21,6 +22,8 @@ The RAW syntax requires nonzero signed 32-bit microsecond values, first pulse po
 
 `RawWriter` emits the canonical official preset name, 16 values per line, LF terminators, and the original timing signs. Custom export serializes only present registers, terminator, and eight PA bytes. Writer errors are sticky; close/delete an incomplete temporary file if its sink fails.
 
+`writePresetMetadata()` saves a custom configuration as a Key metadata file with `Protocol: ESPHackPreset`, avoiding artificial RAW pulses and allowing FIFO/MSK/4-FSK preset storage. This developer-defined protocol is for the ESP-HACK preset manager; stock Flipper has no decoder for it. `settingsFromSub()` restores the radio configuration and optional bounded `X-ESP-RSSI`, `X-ESP-RX-timeout`, and `X-ESP-TX-limit` fields. Extensions must precede any RAW timing data. Missing extensions use defaults. Power/TX profile is deliberately not restored from an untrusted file.
+
 ## Caller obligations
 
 Call `finish()` and require success before treating a file as validated. A pulse sink can receive timing records before a later error is discovered, so it must stage them for analysis/storage. **Never connect a first-pass parser callback directly to a transmitter.** Validate the complete file first and use a separate bounded playback pass, with its own duration limit, manual stop, and storage error handling. An SD file can change between passes; the application should lock it or compare its digest/size/metadata and revalidate while replaying, terminating immediately on any mismatch. Do not transmit arbitrary unknown protocol files merely because a header parsed.
@@ -29,6 +32,6 @@ The included fixtures are synthetic laboratory waveforms/metadata created for th
 
 ## Automated verification
 
-Run `python tests/portable/run_formats_tests.py --compiler PATH_TO_NATIVE_COMPILER`. GCC, Clang, and `zig c++` are supported. ESP32 cross compilation alone does not execute these tests. The suite covers corrupted metadata, numeric overflow, wrong first sign, global alternation, missing/custom presets, limits, sink failures, export round trips, all discrete modem choices, and deterministic malformed-input mutations.
+Run `python tests/portable/run_formats_tests.py --compiler PATH_TO_NATIVE_COMPILER`. GCC, Clang, and `zig c++` are supported. ESP32 cross compilation alone does not execute these tests. The suite covers corrupted metadata, numeric overflow, wrong first sign, global alternation, missing/custom presets, limits, sink failures, export round trips, all discrete modem choices, preset/host setting persistence for five modulations, and deterministic malformed-input mutations. `run_lab_tests.py` additionally exercises the actual laboratory timing decoder against CRC corruption and jitter, RMT splitting edge cases, TX profile limits, and application transitions.
 
 No on-air compatibility, timing fidelity, sensitivity, SD throughput, or legal compliance is established by these host tests. Test with matching presets in the documented controlled physical procedure and retain both devices' logs.

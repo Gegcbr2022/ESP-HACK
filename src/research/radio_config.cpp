@@ -41,7 +41,7 @@ void RegisterImage::set(uint8_t address, uint8_t data) {
     if(address < kRegisterCount) { value[address] = data; present[address] = true; }
 }
 RadioSettings::RadioSettings()
-    : frequencyHz(433920000UL), modulation(Modulation::Fsk2), packetFormat(PacketFormat::Fifo),
+    : frequencyHz(433920000UL), realizedFrequencyHz(433919830UL), modulation(Modulation::Fsk2), packetFormat(PacketFormat::Fifo),
       bandwidthHz(203125.0), dataRateBaud(9600.0), deviationHz(19042.96875), mskPhase(7),
       agc2(0x07), agc1(0x00), agc0(0x91), syncWord(0xE5A7), syncMode(2), crc(true),
       whitening(false), manchester(false), fec(false), packetLength(60),
@@ -170,6 +170,8 @@ bool describeRadio(const RegisterImage& image, uint32_t frequency, RadioSettings
     if(!validateRegisterImage(image, error)) return false;
     RadioSettings result;
     result.frequencyHz = frequency;
+    const uint32_t synthWord = uint32_t(((uint64_t(frequency) << 16) + kCrystalHz / 2) / kCrystalHz);
+    result.realizedFrequencyHz = uint32_t((uint64_t(synthWord) * kCrystalHz + 32768UL) >> 16);
     result.modulation = Modulation((image.value[0x12] >> 4) & 7);
     result.packetFormat = PacketFormat((image.value[0x08] >> 4) & 3);
     result.bandwidthHz = registerBandwidth(image.value[0x10]);
@@ -284,7 +286,8 @@ bool encodeRadioSettings(const RadioSettings& s, RegisterImage& image, RadioSett
     candidate.set(0x1B, s.agc2); candidate.set(0x1C, s.agc1); candidate.set(0x1D, s.agc0);
     memset(candidate.pa, 0, sizeof candidate.pa);
     RadioSettings rounded;
-    if(!describeRadio(candidate, frequency, rounded, error)) return false;
+    if(!describeRadio(candidate, s.frequencyHz, rounded, error)) return false;
+    rounded.realizedFrequencyHz = frequency;
     rounded.rssiThresholdDbm = s.rssiThresholdDbm;
     rounded.rxTimeoutMs = s.rxTimeoutMs; rounded.txLimitMs = s.txLimitMs;
     if(!validateSettings(rounded, error)) return false;

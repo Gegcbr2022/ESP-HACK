@@ -34,11 +34,19 @@ struct SubInfo {
     uint32_t teUs;
     uint8_t key[8], keyBytes;
     bool rawCompatible; // Async ASK/OOK or 2-FSK/GFSK only; never implies TX permission.
+    uint8_t hostFields; // bit0 RSSI, bit1 RX deadline, bit2 TX deadline; optional X-ESP metadata.
+    int16_t rssiThresholdDbm;
+    uint32_t rxTimeoutMs, txLimitMs;
     SubInfo();
 };
 
 typedef bool (*PulseSink)(void* context, int32_t pulseUs);
 typedef bool (*TextSink)(void* context, const char* text, size_t length);
+
+// Preset storage uses Key metadata with a developer-defined protocol, no dummy RAW pulses.
+bool writePresetMetadata(TextSink sink, void* context, const RegisterImage& image,
+                         const RadioSettings& settings);
+bool settingsFromSub(const SubInfo& info, RadioSettings& settings, const char** error = 0);
 
 class SubParser {
 public:

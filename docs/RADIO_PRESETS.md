@@ -22,7 +22,7 @@ The exact source PA tables include the Flipper source's original output settings
 
 ## Advanced settings
 
-`RadioSettings` exposes modulation, FIFO/asynchronous format, frequency, bandwidth, symbol rate, deviation, MSK phase, AGC bytes, sync word/mode, CRC, whitening, Manchester, packet length, UI RSSI threshold, and host RX/TX deadlines. `encodeRadioSettings()` finds the closest supported register combination and returns its realized values in `actual`. Review them before applying. A request whose rounded filter becomes too narrow is rejected, not silently assigned a wider profile.
+`RadioSettings` exposes modulation, FIFO/asynchronous format, frequency, bandwidth, symbol rate, deviation, MSK phase, AGC bytes, sync word/mode, CRC, whitening, Manchester, packet length, UI RSSI threshold, and host RX/TX deadlines. `encodeRadioSettings()` finds the closest supported register combination and returns its realized modem values in `actual`. `frequencyHz` remains the nominal channel request, while `realizedFrequencyHz` reports synthesizer quantization; this keeps channel policy checks tied to the user's selected nominal channel. Review them before applying. A request whose rounded filter becomes too narrow is rejected, not silently assigned a wider profile.
 
 The data-rate parameter is the **symbol rate**. 4-FSK carries two payload bits per symbol; its preamble/sync use 2-FSK. ASK and OOK share `MOD_FORMAT=3`; their amplitude depth/shaping is controlled by the PA table and `FREND0`, not a separate modulation selector.
 
