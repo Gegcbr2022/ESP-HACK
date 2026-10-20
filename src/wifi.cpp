@@ -5,7 +5,7 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <SD.h>
-#include "Explorer.h"
+#include "explorer.h"
 #include "interface/interface.h"
 #include "CONFIG.h"
 #include "misc.h"

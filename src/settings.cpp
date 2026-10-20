@@ -4,7 +4,7 @@
 #include <SD.h>
 #include <Update.h>
 #include "CONFIG.h"
-#include "Explorer.h"
+#include "explorer.h"
 #include "interface/interface.h"
 #include "menu/settings.h"
 

@@ -11,7 +11,7 @@
 #include "interface/interface.h"
 #include "menu/infrared.h"
 #include "menu/subghz.h"
-#include "Explorer.h"
+#include "explorer.h"
 
 struct IrCode {
   uint8_t timer_val;

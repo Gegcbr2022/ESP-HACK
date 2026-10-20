@@ -1,4 +1,4 @@
-#include "Explorer.h"
+#include "explorer.h"
 
 extern bool ensureSDReadyInteractive(bool allowSkip);
 extern void showSDInitErrorScreen();

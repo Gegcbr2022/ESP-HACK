@@ -3,7 +3,7 @@
 #include "CONFIG.h"
 #include "misc.h"
 #include <SD.h>
-#include "Explorer.h"
+#include "explorer.h"
 #include "interface/interface.h"
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>

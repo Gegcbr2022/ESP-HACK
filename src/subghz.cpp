@@ -1,6 +1,6 @@
 #include "subghz.h"
 #include "menu/subghz.h"
-#include "Explorer.h"
+#include "explorer.h"
 #include "interface/interface.h"
 #include "display.h"
 #include <SD.h>

@@ -17,7 +17,7 @@
 #include "menu/gpio.h"
 #include "menu/games.h"
 #include "menu/settings.h"
-#include "Explorer.h"
+#include "explorer.h"
 
 void handleWiFiSubmenu();
 void handleBluetoothSubmenu();
