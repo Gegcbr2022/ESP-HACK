@@ -453,9 +453,9 @@ void publishCaptureHistory() {
 }
 TriggeredCapture makeRawCandidate(uint32_t startedUs) {
     // Keep repeated frames and their inter-frame guard in one history signal.
-    // Advanced single capture/tracing preserve the original7ms boundary.
+    // Diagnostic trace matches history; advanced single capture stays7ms.
     return TriggeredCapture(capture,kWaveformCapacity,activeSettings.rssiThresholdDbm,
-                            startedUs,activeRawHistory?30000:TriggeredCapture::kQuietUs);
+                            startedUs,(activeRawHistory||rawTrace.info().enabled)?30000:TriggeredCapture::kQuietUs);
 }
 bool restartRawCandidate(TriggeredCapture& trigger) {
     raw_capture::stop();
