@@ -84,8 +84,12 @@ receive-only radio measurements within bounded memory and callback budgets.
 
 ## Four-button controls
 
-UP/DOWN navigate; OK opens; BACK returns. Text entry uses UP/DOWN to select a
-character, OK to append, BACK to delete, hold OK to finish, hold BACK to cancel.
+UP/DOWN navigate; OK opens; BACK returns. Text fields show an **8 × 4 keyboard**:
+UP/DOWN select a key, hold UP/DOWN changes pages, OK types or activates
+SP / <- / >> / OK, BACK deletes, hold OK accepts and hold BACK cancels while
+preserving the original field. Numeric/HEX/filename fields retain their own
+ASCII alphabets. Accepting nonempty normal-chat text queues a message; cancelling
+does not. See the [keyboard guide](docs/KEYBOARD_RU.md).
 Release the initiating button before the next screen accepts a new action.
 Long informational screens scroll with UP/DOWN. RAW transmission requires a
 fresh hold-OK action; BACK aborts RAW playback. Chat uses its manual send menu.
@@ -112,7 +116,7 @@ The user confirmed failed reception in both ESP32/Flipper directions on the
 Russian `c5779ee` build. The connected peer is Unleashed `unlshd-086e`
 (`e7e4e179`); its backed-up Enhanced Sub-Ghz Chat 1.2 uses API 87.6 and delegates
 the radio worker to that firmware. Source/profile checks have not established
-the physical cause. The final `d63f1ca` image passed controlled plaintext
+the physical cause. The earlier verified `d63f1ca` image passed controlled plaintext
 exchange in both directions between its normal chat UI and the installed
 Flipper's internal-radio CLI at nominal 433.920 MHz, with the ESP32's saved
 +115 ppm correction. Enhanced Chat's GUI itself was not tested. The supplied ESP ACK companion
@@ -126,6 +130,8 @@ browsing and per-device calibration. All three jobs also passed at `d63f1ca`,
 including its carrier-gate change. All four final flash segments verified and
 the controlled normal-UI/Flipper-CLI two-way test passed. Earlier
 release 1 evidence and exact source states are separated in the test report.
+The later `087f9b6` keyboard build awaits a new device test; `d63f1ca` RF/app
+results are historical evidence for the identified image.
 
 ## Build, test, flash and rollback
 
@@ -151,9 +157,11 @@ menu/rendering/migration checks. These results cover software behavior and
 bounds; they do not establish physical OLED/button usability or RF performance.
 Additional suites passed 1,066,348 static encoder checks, 1,108,737 pagination
 checks, 1,048,643 automatic chat profile/carrier-gate checks and 246 mock clock probe checks.
-Actual-browser, UART-dispatch and calibration suites passed 5,026, 1,489 and
+Actual-browser, editor/UART and calibration suites passed 5,026, 2,429 and
 6,730,289 checks respectively; calibration mocks do not establish a measured
 correction for every module.
+The keyboard model passed 1,460,550 checks under Zig/GCC, with additional
+GCC address/undefined-behavior sanitizer validation.
 Basic settings and new screens use Russian; remaining advanced legacy screens
 may retain English labels. Filenames and protocol identifiers are not translated.
 

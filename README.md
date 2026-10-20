@@ -78,11 +78,18 @@ history; BACK leaves chat. **Sent** confirms local transmission, without a peer
 ACK in plaintext mode. Physical reception still failed in both directions on
 the Russian `c5779ee` build. The connected Flipper was identified as Unleashed
 `unlshd-086e` (`e7e4e179`), with Enhanced Sub-Ghz Chat 1.2 in its SD backup.
-The final `d63f1ca` image passed controlled two-way plaintext exchange between
+The earlier verified `d63f1ca` image passed controlled two-way plaintext exchange between
 the normal ESP32 chat UI and that Flipper's internal-radio CLI at nominal
 433.920 MHz, with this ESP32's saved +115 ppm correction. The Enhanced Chat
 GUI itself was not tested. Range, measured RF power and ESP ACK/FAP delivery
 remain unverified; see the test report.
+
+Text fields now show an **8 × 4 keyboard**. UP/DOWN select a key, hold UP/DOWN
+changes pages, OK types or activates SP / <- / >> / OK, and BACK erases.
+Hold OK accepts; hold BACK cancels and preserves the original field. Accepting
+nonempty text in the normal chat send menu queues it for transmission. Input
+remains ASCII, with field-specific numeric/HEX/filename alphabets. See the
+[keyboard guide](docs/KEYBOARD_RU.md).
 
 ## Validation boundaries
 
@@ -104,8 +111,10 @@ Release 2 native tests pass under Windows Zig and Ubuntu GCC: 91,990 Lua checks
 with 16,500 app frames, 758,551 catalog checks and 21,892 menu/migration checks.
 Static encoders passed 1,066,348 checks; pagination passed 1,108,737 checks; the
 automatic chat profile/carrier gate passed 1,048,643 checks and the mock clock probe passed 246.
-The actual browser passed 5,026 checks, UART dispatch 1,489 and calibration
+The actual browser passed 5,026 checks, editor/UART control 2,429 and calibration
 math/persistence 6,730,289. These use host adapters rather than physical radio.
+The visible keyboard model passed 1,460,550 checks under Zig/GCC, including
+GCC address/undefined-behavior sanitizer runs.
 All eleven Russian SD apps passed 120 diagnostic frames each on the final
 `d63f1ca` ESP32 image with radio starts disabled.
 The `e23c31d` diagnostic candidate was verified flashed and yielded the one-way
@@ -114,6 +123,8 @@ browsing and device calibration. All three CI jobs passed again at `d63f1ca`,
 including the carrier-gate correction. All four flash segments were verified;
 controlled two-way plaintext exchange with the installed Flipper CLI passed.
 This does not establish Enhanced Chat GUI interoperability or RF performance.
+The newer `087f9b6` keyboard source awaits its own device retest; the results
+above identify the earlier `d63f1ca` image.
 Exact source states and limits are in the [test report](docs/TEST_REPORT.md).
 
 Unrelated upstream applications remain available; their hardware behavior is

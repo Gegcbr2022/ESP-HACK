@@ -8,10 +8,13 @@ Release 1 artifact/device evidence is explicitly historical. The Russian
 still failed both physical directions. A verified later `e23c31d` image received
 controlled Flipper packets with valid CRC at an adjusted programmed receive
 frequency. All three CI jobs passed at `28e4d46` and the subsequent `d63f1ca`
-carrier-gate change. The final `d63f1ca` image passed controlled two-way
+carrier-gate change. The earlier verified `d63f1ca` image passed controlled two-way
 plaintext exchange between the normal ESP32 chat UI and the installed
 Flipper's internal-radio CLI. Enhanced Chat's GUI itself was not tested;
 the result does not establish general RF performance or ESP ACK/FAP delivery.
+The later `087f9b6` source adds the visible keyboard. Its hardware keyboard,
+RF and eleven-app retest is pending; the `d63f1ca` device record below remains
+historical evidence for that identified image.
 
 ## Build results
 
@@ -24,7 +27,8 @@ the result does not establish general RF performance or ESP ACK/FAP delivery.
 | Russian release 2 source `c5779ee`: Pocket/settings, static Send, simple chat and eleven apps | PASS build/CI; device app checks recorded below | Linux SH1106 CI linked and uploaded its firmware; all eleven Russian SD apps passed 120 diagnostic frames each on the ESP32 build. Physical chat still failed both directions. The release owner's image manifest identifies the separately built device binary |
 | Intermediate image `e23c31d` | Verified flashed; controlled one-way RX PASS | Valid-CRC Flipper-to-ESP32 packets at adjusted programmed RX frequency; final calibrated two-way exchange was not established by this test |
 | Source `28e4d46`: complete-path pagination, reference-clock probe, UART diagnostics and device calibration | PASS native / ESP32 / Flipper CI | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,605 flash bytes (86.3%); both target artifacts uploaded. Final device evidence is recorded separately |
-| Final source `d63f1ca`: host carrier-gate correction | PASS native / ESP32 / Flipper CI and controlled device tests | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,629 flash bytes (86.3%); both target artifacts uploaded. Separately built device application 1,703,456 bytes, all four segments verified; normal-UI/Flipper-CLI plaintext exchange passed both directions, as detailed below |
+| Previously verified source `d63f1ca`: host carrier-gate correction | PASS native / ESP32 / Flipper CI and controlled device tests | Exact Linux SH1106 build: 118,848 static RAM bytes, 1,696,629 flash bytes (86.3%); both target artifacts uploaded. Separately built device application 1,703,456 bytes, all four segments verified; normal-UI/Flipper-CLI plaintext exchange passed both directions, as detailed below |
+| Later source `087f9b6`: visible keyboard | Native keyboard/model/controller PASS; target/CI/device retest pending |8 × 4 ASCII keys, field-specific alphabets and cancel preserving original output; the earlier `d63f1ca` RF/app result does not identify this image |
 | Companion Flipper chat FAP (previous checked source) | PASS | uFBT 0.2.6, official firmware/SDK 1.5.1, target 7 / API 88.2; actual `.fap` produced and strict import check passed |
 
 The official Flipper source reference is
@@ -48,7 +52,8 @@ then linked with the C++ test harness; it is not replaced by a Python emulator.
 | Static `.sub` encoder | **1,066,348 checks PASS** | Exact `RcSwitch` protocol 1 and `Princeton` 1..32-bit inputs, CAME 12/24, six periods, bit order, period decoding, TE/guard handling, CAME LOW-header rotation, duration/capacity/canaries and unsupported metadata/modem refusal. Non-24 Princeton is an ESP-HACK legacy-input extension; official Flipper Princeton is 24 bits |
 | Radio file pagination / complete paths | **1,108,737 checks PASS** | 39 lightweight identities plus a separate NextPage slot; directories 0–1000 entries across every page, order/coverage, stale identity refusal, deletion clamp, 1023-byte complete-path boundary and Russian/spaced names; no filesystem hardware in this harness |
 | Actual file-browser controller, mocked SD | **5,026 checks PASS** | Production list/resolve/path functions: directory rescan identities, long UTF-8 filenames, page controls and refusal without opening a truncated preview |
-| Actual idle UART dispatcher, mocked serial | **1,489 checks PASS** | Deferred chat opening after parser return, bounded input and repeated open/send/close lifecycle; no serial hardware or RF in this harness |
+| Actual text editor / idle UART dispatcher, mocked serial/display/buttons | **2,429 checks PASS** | Production editor and controller functions: visible action keys, paging, buffer bounds, cancel preserving original, deferred chat/editor opening, repeated lifecycle and preview accepting/cancelling without TX; replaces the earlier UART-only count. No serial hardware or RF in this harness |
+| Visible keyboard model | **1,460,550 checks PASS** | Production ASCII model and real caller alphabet under Zig/GCC; numeric/HEX/filename sets, pages, action cells, tail/buffer/canary bounds, acceptance/cancellation and randomized operations; additional GCC ASan/UBSan run passed |
 | Device-local frequency correction | **6,730,289 checks PASS** | Signed ppm arithmetic, band edges, bounded NVS values, persistence/readback and busy/error guards; no external RF frequency calibration in this harness |
 | CC1101 reference-clock probe, hardware mocks | **246 checks PASS** | Actual probe source with PCNT/SPI/clock adapters; finite measurements, busy/SPI/counter/timing/overflow faults, pin/register restoration and cleanup; no actual crystal measurement in this harness |
 | Legacy payload / replay guards | PASS | First/changed key length packing, exact OOK preset application, unsupported formats/protocols, payload and timing bounds; this harness does not export a numeric check count |
@@ -102,6 +107,7 @@ python tests/flipper_chat_compat/run.py --compiler <zig.exe>
 python tests/spi_driver_mock/run_spi_tests.py --compiler <zig.exe>
 python tests/rf_clock_mock/run.py --compiler <zig.exe>
 python tests/radio_serial_mock/run.py --compiler <zig.exe>
+python tests/keyboard_mock/run.py --compiler <zig.exe>
 python tests/radio_calibration_mock/run.py --compiler <zig.exe>
 python tests/raw_capture_mock/run.py --cxx <zig.exe> --zig
 python tests/triggered_capture/run_triggered_tests.py --compiler <zig.exe>
@@ -125,7 +131,7 @@ tests, the SH1106 firmware and the official 1.5.1 FAP. Native C++ suites use
 and does not require Zig on Linux. The native job includes all eleven Lua apps,
 app catalog, Pocket appearance/migration, parser/static encoders, chat profile,
 file pagination/browser, clock-probe mocks, UART lifecycle, device calibration,
-legacy guards and installer checks.
+keyboard model, legacy guards and installer checks.
 
 The configured action release tags were checked against the official
 [checkout release](https://github.com/actions/checkout/releases/tag/v7.0.1),
@@ -221,7 +227,7 @@ valid-CRC packets, zero frequency-error estimate and persistence of the local
 blocked ESP32 transmission under background carrier indication; `d63f1ca`
 changes that host gate; the final test below then passed both directions.
 
-### Final `d63f1ca` device sign-off
+### Verified `d63f1ca` device record (historical)
 
 The separately built final application was 1,703,456 bytes, SHA256
 `0759a2b353ef54feed546e7b24de061c9eb389f7da61f9fcfc808ff642a484fb`.

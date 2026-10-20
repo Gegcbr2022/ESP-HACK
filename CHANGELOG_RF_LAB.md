@@ -8,6 +8,11 @@
   technical protocol names and advanced legacy labels remain unchanged.
 - Opened the simple radio home directly from **Радио SubGHz**, with the old
   radio menu and technical tools under **Дополнительно**.
+- Added a visible 8 × 4 ASCII keyboard with character pages, selected-key
+  highlight, text tail/length counter and SP / <- / >> / OK actions. Hold
+  UP/DOWN changes pages; hold BACK cancels without changing the original field.
+  Normal-chat acceptance of nonempty text queues a message, while the deferred
+  USB `chatedit` preview always discards it. See [keyboard controls](docs/KEYBOARD_RU.md).
 - Added file pages of 39 actual paths plus a separate Next Page row, previous
   page navigation, hold-UP/DOWN page shortcuts and visible page/total counts.
   Full names resolve from lightweight directory identities into one selected
@@ -37,7 +42,7 @@
   diagnostics for reproducing the user's failures in both RF directions.
   Both RF directions failed on the Russian `c5779ee` build; later controlled
   one-way valid-CRC reception required a device-local frequency correction.
-  The final `d63f1ca` image passed controlled two-way plaintext exchange with
+  The earlier verified `d63f1ca` image passed controlled two-way plaintext exchange with
   the installed Flipper's internal-radio CLI at nominal 433.920 MHz using this
   ESP32's saved +115 ppm correction. Enhanced Chat GUI and ESP ACK/FAP delivery
   remain unverified. Local Sent is not a peer acknowledgement; finite TX governors remain active.
@@ -53,8 +58,9 @@
 - Passed 1,066,348 static encoder, 1,108,737 pagination, 1,048,643 chat profile/carrier-gate
   and 246 mock clock probe checks. Added finite idle-only USB clock diagnostics;
   mock tests do not establish the installed module's crystal frequency.
-- Actual-browser, UART-dispatch and calibration math/persistence suites passed
-  5,026, 1,489 and 6,730,289 checks. Device frequency trim is stored locally;
+- Actual-browser, editor/UART and calibration math/persistence suites passed
+  5,026, 2,429 and 6,730,289 checks. Keyboard-model tests passed 1,460,550 checks
+  under Zig/GCC and GCC address/undefined-behavior sanitizers. Device frequency trim is stored locally;
   other modules keep their own settings rather than inheriting this unit's trim.
 - All three CI jobs passed at `c5779ee`. The verified-flashed `e23c31d`
   diagnostic candidate received valid-CRC Flipper packets at an adjusted
@@ -63,6 +69,8 @@
   `d63f1ca`; its host carrier gate uses cached RSSI/sync state. The final image's
   four flash segments verified, normal chat UI/Flipper CLI passed both RF
   directions without panic, and chat close restored the main menu.
+- The later `087f9b6` visible-keyboard source requires a new physical keyboard,
+  RF and eleven-app check; the recorded `d63f1ca` hardware result remains historical.
 
 See [Pocket UI](docs/POCKET_UI.md), [SD games](docs/SD_GAMES.md),
 [SD utilities](docs/SD_UTILITIES.md) and [test results](docs/TEST_REPORT.md).
