@@ -22,6 +22,8 @@ struct Snapshot {
     uint32_t rejected;
     uint32_t startedUs;
     uint32_t lastEdgeUs;
+    uint8_t lastRejectedCause; //1=repeated level,2=zero duration,3=too long
+    uint32_t lastRejectedUs;
 };
 
 bool start(uint8_t pin);

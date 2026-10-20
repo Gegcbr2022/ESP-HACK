@@ -59,6 +59,18 @@ FlipperChatRx plaintextRx;
 FlipperChatTx plaintextTx;
 // At most 2048 pulses plus splits; 4096 half-items cover all <=5s waveforms.
 rmt_item32_t* rmtItems;
+RawTraceEntry* rawTraceBank;
+RawTrace rawTrace;
+static const size_t kRawTraceCapacity=4096;
+
+void traceRaw(uint8_t kind,uint32_t atUs,int32_t value,const TriggeredCapture& trigger) {
+    portENTER_CRITICAL(&lock);
+    rawTrace.record(kind,atUs,value,uint8_t(trigger.phase()),trigger.size(),trigger.postTriggerPulses(),
+                    trigger.rssiQualified(),trigger.triggered());
+    if(trigger.terminal())rawTrace.freeze();
+    portEXIT_CRITICAL(&lock);
+}
+void freezeRawTrace() { portENTER_CRITICAL(&lock);rawTrace.freeze();portEXIT_CRITICAL(&lock); }
 
 void status(const char* text);
 void errorCount(uint32_t LabSnapshot::*field);
@@ -343,6 +355,7 @@ void publishRaw(const TriggeredCapture& trigger, const raw_capture::Snapshot& co
     state.captureRearms=trigger.rearmCount();state.captureShortDiscarded=trigger.discardedShort();
     state.captureArmingDropped=trigger.discardedArmingDropped();state.captureArmingRejected=trigger.discardedArmingRejected();
     state.captureQualifiedPulses=trigger.postTriggerPulses();state.captureRssiQualified=trigger.rssiQualified();
+    state.lastRejectedCause=counters.lastRejectedCause;state.lastRejectedUs=counters.lastRejectedUs;
     portEXIT_CRITICAL(&lock);
 }
 void drainRaw(TriggeredCapture& trigger, bool finishing = false) {
@@ -350,15 +363,18 @@ void drainRaw(TriggeredCapture& trigger, bool finishing = false) {
     for(size_t drained = 0; drained < raw_capture::kCapacity &&
         (finishing || !stopRequested) && raw_capture::pop(pulse,endedAtUs); ++drained) {
         trigger.pulse(pulse, endedAtUs);
+        traceRaw(1,endedAtUs,pulse,trigger);
     }
 }
 bool rawCaptureTick(TriggeredCapture& trigger,uint32_t& lastSample,uint32_t nowMs) {
     drainRaw(trigger);
-    bool sampled=false;int16_t rssi=-127;
+    const auto before=trigger.phase();const uint32_t beforeRearm=trigger.rearmCount();
+    bool sampled=false;int16_t rssi=-127;uint32_t sampledAt=0;
     if(nowMs-lastSample>=1) {
-        rssi=sampleRawRssi();lastSample=nowMs;sampled=true;
+        rssi=sampleRawRssi();sampledAt=micros();lastSample=nowMs;sampled=true;
         if(!ELECHOUSE_cc1101.spiReady()) {
             trigger.pulse(0,micros());errorCount(&LabSnapshot::spiErrors);
+            traceRaw(3,micros(),-1,trigger);freezeRawTrace();
             publishRaw(trigger,raw_capture::snapshot());status("SPI fault during RAW");return false;
         }
     }
@@ -376,11 +392,15 @@ bool rawCaptureTick(TriggeredCapture& trigger,uint32_t& lastSample,uint32_t nowM
         if(!wasTriggered&&trigger.triggered())status("Triggered: capturing one burst");
         trigger.poll(decisionUs);
     }
+    if(sampled)traceRaw(2,sampledAt,rssi,trigger);
+    if(before!=trigger.phase()||beforeRearm!=trigger.rearmCount())
+        traceRaw(3,decisionUs,int32_t(trigger.rearmCount()),trigger);
     publishRaw(trigger,counters);
     if(!trigger.terminal())return true;
     if(trigger.full())status("RAW full: capture not saved");
     else if(trigger.complete())status("One burst ready: OK to save");
     else status("RAW damaged: capture not saved");
+    freezeRawTrace();
     return false;
 }
 bool prepareRawThreshold() {
@@ -395,6 +415,9 @@ bool prepareRawThreshold() {
                 errorCount(&LabSnapshot::spiErrors);status("SPI fault during RAW noise sample");return false;
             }
             gate.sample(rssi,micros());
+            portENTER_CRITICAL(&lock);
+            rawTrace.record(2,micros(),rssi,uint8_t(TriggeredCapture::Phase::Armed),0,0,false,false);
+            portEXIT_CRITICAL(&lock);
             portENTER_CRITICAL(&lock);state.rawThresholdSamples=gate.samples();portEXIT_CRITICAL(&lock);
         }
         if(!gate.ready() && !gate.failed())vTaskDelay(1);
@@ -624,6 +647,7 @@ void worker(void*) {
         const auto finalCapture = raw_capture::snapshot();
         rawTrigger.integrity(finalCapture.dropped, finalCapture.rejected);
         rawTrigger.stop(micros()); publishRaw(rawTrigger, finalCapture);
+        traceRaw(3,micros(),int32_t(rawTrigger.rearmCount()),rawTrigger);freezeRawTrace();
     }
     idle(); pinMode(CC1101_GDO0, INPUT);
     portENTER_CRITICAL(&lock); state.active = false; portEXIT_CRITICAL(&lock);
@@ -646,6 +670,7 @@ bool labStart(LabMode mode, const RegisterImage& image, const RadioSettings& set
     xQueueReset(commands);
     xQueueReset(inbox);
     activeImage = image; activeSettings = settings; activeProfile = profile;
+    if(mode==LabMode::Raw){portENTER_CRITICAL(&lock);rawTrace.reset();portEXIT_CRITICAL(&lock);}
     activePower = powerIndex <= 2 ? powerIndex : 0; stepHz = sweepStepHz;
     memset(&state, 0, sizeof(state)); captured = 0;
     LabEvent event=LabEvent::Stop;
@@ -722,6 +747,28 @@ size_t labCopyPulses(int32_t* output, size_t capacity) {
     // Existing prefix is immutable until the UI explicitly starts a new capture.
     if(n)memcpy(output, capture, n * sizeof(*output));
     return n;
+}
+bool labRawTraceEnable(bool enabled) {
+    if(workerHandle)return false;
+    if(enabled&&!rawTraceBank) {
+        rawTraceBank=static_cast<RawTraceEntry*>(heap_caps_malloc(kRawTraceCapacity*sizeof(RawTraceEntry),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
+        if(!rawTraceBank)return false;
+        rawTrace.bind(rawTraceBank,kRawTraceCapacity);
+    }
+    portENTER_CRITICAL(&lock);rawTrace.enable(enabled);portEXIT_CRITICAL(&lock);
+    return true;
+}
+RawTraceInfo labRawTraceInfo() {
+    portENTER_CRITICAL(&lock);const RawTraceInfo result=rawTrace.info();portEXIT_CRITICAL(&lock);return result;
+}
+bool labRawTraceCopy(size_t index,RawTraceEntry& entry) {
+    portENTER_CRITICAL(&lock);const bool copied=rawTrace.copy(index,entry);portEXIT_CRITICAL(&lock);return copied;
+}
+bool labRawTraceRelease() {
+    if(workerHandle)return false;
+    portENTER_CRITICAL(&lock);rawTrace.bind(nullptr,0);portEXIT_CRITICAL(&lock);
+    if(rawTraceBank){heap_caps_free(rawTraceBank);rawTraceBank=nullptr;}
+    return true;
 }
 bool labTransmitRaw(const int32_t* pulses, size_t count, const RegisterImage& image,
                     uint32_t hz, TxProfile profile, uint8_t powerIndex,

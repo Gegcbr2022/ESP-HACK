@@ -33,6 +33,8 @@ void IRAM_ATTR edgeInterrupt(void*) {
         // zero interval, and avoid signed overflow after a >35-minute idle.
         if (level == counters.lastLevel || duration == 0 || duration > INT32_MAX) {
             ++counters.rejected;
+            counters.lastRejectedCause=level==counters.lastLevel?1:duration==0?2:3;
+            counters.lastRejectedUs=now;
         } else if (used == kCapacity) {
             ++counters.dropped;
         } else {

@@ -1,6 +1,7 @@
 #pragma once
 #include "radio_config.h"
 #include "lab_limits.h"
+#include "raw_trace.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -19,6 +20,8 @@ struct LabSnapshot {
     uint32_t captureRearms, captureShortDiscarded, captureArmingDropped, captureArmingRejected;
     uint32_t captureQualifiedPulses;
     bool captureRssiQualified;
+    uint8_t lastRejectedCause;
+    uint32_t lastRejectedUs;
     uint16_t sweepIndex, sweepPasses;
     int16_t sweep[kSweepBins], peakHold[kSweepBins];
     uint8_t registers[kRegisterCount];
@@ -51,6 +54,12 @@ bool labQueueText(const char* text, uint16_t destination = 0);
 bool labDiscover();
 bool labReceiveMessage(uint16_t& source, char* text, size_t capacity);
 size_t labCopyPulses(int32_t* output, size_t capacity);
+// Debug-only ring: enable before starting RAW, dump only after stop/join.
+// Disable freezes/preserves evidence; release frees the optional49KiB bank.
+bool labRawTraceEnable(bool enabled);
+RawTraceInfo labRawTraceInfo();
+bool labRawTraceCopy(size_t index,RawTraceEntry& entry);
+bool labRawTraceRelease();
 // Stops/joins the worker. Exact user waveform, finite duration, manual BACK abort.
 // Physical writable config/PA/GDO mode and stable RX/IDLE are restored on every mutated
 // exit. Saved synthesizer bytes are restored directly, without reapplying trim.
