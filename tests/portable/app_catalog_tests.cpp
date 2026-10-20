@@ -14,7 +14,7 @@ static bool paths_and_metadata() {
     CHECK(validAppFilename(limit.c_str())); CHECK(!validAppFilename(("a"+limit).c_str()));
     Entry entry; initialize(entry,"field_tool.lua",1234);
     CHECK(!strcmp(entry.file,"field_tool.lua")); CHECK(!strcmp(entry.title,"field_tool"));
-    CHECK(entry.bytes==1234&&entry.category==Category::Tools); CHECK(strstr(entry.description,"hold BACK"));
+    CHECK(entry.bytes==1234&&entry.category==Category::Tools); CHECK(strstr(entry.description,"BACK"));
     metadata(entry,nullptr,0); CHECK(!strcmp(entry.title,"field_tool"));
     const char source[]="\xEF\xBB\xBF\n \t-- @name:  Friendly tool \t\r\n-- @category: Games\n"
         "-- @description: Useful description\r\napp={}\n-- @name: Must not apply\n";
@@ -28,6 +28,17 @@ static bool paths_and_metadata() {
     exact="-- @name: "+std::string(22,'X')+"\n-- @description: "+std::string(65,'X')+"\n";
     metadata(entry,exact.data(),exact.size()); CHECK(entry.title[0]=='N'&&strlen(entry.title)==21);
     CHECK(entry.description[0]=='D'&&strlen(entry.description)==64);
+    const char russian[]="-- @name: Секундомер\n-- @description: Удерживайте BACK для выхода\n";
+    metadata(entry,russian,sizeof russian-1);CHECK(!strcmp(entry.title,"Секундомер"));
+    CHECK(!strcmp(entry.description,"Удерживайте BACK для выхода"));
+    std::string ruLimit="-- @name: ";for(unsigned i=0;i<21;++i)ruLimit+="Я";
+    ruLimit+="\n-- @description: ";for(unsigned i=0;i<64;++i)ruLimit+="ё";ruLimit+='\n';
+    metadata(entry,ruLimit.data(),ruLimit.size());CHECK(strlen(entry.title)==42);CHECK(strlen(entry.description)==128);
+    const char malformed[]="-- @name: bad\xD0\n-- @description: \xC0\xAF\n";
+    metadata(entry,malformed,sizeof malformed-1);CHECK(strlen(entry.title)==42);CHECK(strlen(entry.description)==128);
+    std::string tooMany="-- @name: ";for(unsigned i=0;i<22;++i)tooMany+="я";tooMany+='\n';
+    metadata(entry,tooMany.data(),tooMany.size());CHECK(strlen(entry.title)==42);
+    CHECK(!strcmp(sectionNameRu(Section::Favorites),"Избранное"));
     initialize(entry,"x.lua",1); const std::string late="--"+std::string(1022,' ')+"\n-- @name: Too late\n";
     metadata(entry,late.data(),late.size()); CHECK(!strcmp(entry.title,"x"));
     const std::string lines=std::string(32,'\n')+"-- @name: Too late\n";
@@ -88,8 +99,7 @@ static bool preferences_and_filters() {
 static bool printable(const char* text,size_t capacity) {
     const char* end=static_cast<const char*>(memchr(text,0,capacity));
     if(!end) return false;
-    for(const char* p=text;p<end;++p) if(uint8_t(*p)<32||uint8_t(*p)>126) return false;
-    return true;
+    return ui_text::validate(text,size_t(end-text));
 }
 static bool adversarial_metadata_and_preferences() {
     struct Guarded { uint8_t before[16]; Entry entry; uint8_t after[16]; } guarded;

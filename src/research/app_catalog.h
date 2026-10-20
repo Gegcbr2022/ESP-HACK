@@ -1,5 +1,6 @@
 #pragma once
 #include "app_filename.h"
+#include "../interface/utf8_text.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -9,7 +10,7 @@ namespace research { namespace apps {
 enum class Category : uint8_t { Tools, Games, Radio };
 enum class Section : uint8_t { All, Tools, Games, Radio, Favorites, Recent };
 struct Entry {
-    char file[41], title[22], description[65];
+    char file[41], title[43], description[129];
     uint32_t bytes;
     Category category;
 };
@@ -20,6 +21,17 @@ struct Preferences {
 inline const char* sectionName(Section section) {
     static const char* names[]={"All apps","Tools","Games","Radio","Favorites","Recent"};
     return names[uint8_t(section)<6?uint8_t(section):0];
+}
+inline const char* sectionNameRu(Section section) {
+    static const char* names[]={"Все приложения","Инструменты","Игры","Радио","Избранное","Недавние"};
+    return names[uint8_t(section)<6?uint8_t(section):0];
+}
+inline bool copyText(char* output,size_t capacity,const char* text,size_t length,size_t maxGlyphs) {
+    while(length&&(text[length-1]==' '||text[length-1]=='\r'||text[length-1]=='\t'))--length;
+    while(length&&(*text==' '||*text=='\t')){++text;--length;}
+    size_t glyphs=0;
+    if(!length||length>=capacity||!ui_text::validate(text,length,&glyphs)||glyphs>maxGlyphs)return false;
+    memcpy(output,text,length);output[length]=0;return true;
 }
 inline bool copyAscii(char* output,size_t capacity,const char* text,size_t length) {
     while(length&&(text[length-1]==' '||text[length-1]=='\r'||text[length-1]=='\t'))--length;
@@ -32,8 +44,8 @@ inline void initialize(Entry& entry,const char* file,uint32_t bytes) {
     memset(&entry,0,sizeof entry);entry.bytes=bytes;entry.category=Category::Tools;
     snprintf(entry.file,sizeof entry.file,"%s",file);
     const size_t length=strlen(file);const size_t stem=length>=4?length-4:length;
-    snprintf(entry.title,sizeof entry.title,"%.*s",int(stem),file);
-    snprintf(entry.description,sizeof entry.description,"SD application / hold BACK to exit");
+    snprintf(entry.title,sizeof entry.title,"%.*s",int(stem>21?21:stem),file);
+    snprintf(entry.description,sizeof entry.description,"Удерживайте BACK для выхода");
 }
 // Metadata is data, never Lua execution. Stop at the first non-comment source line.
 inline void metadata(Entry& entry,const char* source,size_t length) {
@@ -50,8 +62,8 @@ inline void metadata(Entry& entry,const char* source,size_t length) {
         const size_t key=p;while(p<end&&source[p]!=':')++p;
         if(p==end)continue;
         const size_t keyLength=p-key;++p;
-        if(keyLength==4&&!memcmp(source+key,"name",4))copyAscii(entry.title,sizeof entry.title,source+p,end-p);
-        else if(keyLength==11&&!memcmp(source+key,"description",11))copyAscii(entry.description,sizeof entry.description,source+p,end-p);
+        if(keyLength==4&&!memcmp(source+key,"name",4))copyText(entry.title,sizeof entry.title,source+p,end-p,21);
+        else if(keyLength==11&&!memcmp(source+key,"description",11))copyText(entry.description,sizeof entry.description,source+p,end-p,64);
         else if(keyLength==8&&!memcmp(source+key,"category",8)) {
             char category[12]={};if(!copyAscii(category,sizeof category,source+p,end-p))continue;
             if(!strcmp(category,"Games"))entry.category=Category::Games;

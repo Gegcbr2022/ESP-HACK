@@ -4,6 +4,7 @@
 #include "lab_service.h"
 #include "../subghz.h"
 #include "../interface/menu/pocket_menu.h"
+#include "../interface/ui_text.h"
 #include <Arduino.h>
 #include <SD.h>
 #include <esp_heap_caps.h>
@@ -39,11 +40,12 @@ int uiText(lua_State* state) {
     const int x = coordinate(state, 1, -128, 255), y = coordinate(state, 2, -64, 127);
     size_t length = 0; const char* text = luaL_checklstring(state, 3, &length);
     if(length > 160) return luaL_error(state, "text exceeds 160 bytes");
-    for(size_t i = 0; i < length; ++i) if(uint8_t(text[i]) < 32 || uint8_t(text[i]) > 126)
-        return luaL_error(state, "text must be printable ASCII");
+    if(!ui_text::validate(text,length))return luaL_error(state,"text must be printable ASCII or Russian UTF-8");
     const int scale = lua_isnoneornil(state, 4) ? 1 : coordinate(state, 4, 1, 2);
     display.setTextSize(scale); display.setTextWrap(false); display.setTextColor(SH110X_WHITE);
-    display.setCursor(x, y); display.write(reinterpret_cast<const uint8_t*>(text), length);
+    bool ascii=true;for(size_t i=0;i<length;++i)if(uint8_t(text[i])>=128){ascii=false;break;}
+    if(ascii){display.setCursor(x,y);display.write(reinterpret_cast<const uint8_t*>(text),length);}
+    else ui_text::draw(display,x,y,text,SH110X_WHITE,160,scale);
     return 0;
 }
 int uiLine(lua_State* state) {
@@ -126,11 +128,19 @@ void resetButtons() { buttonUp.resetStates(); buttonDown.resetStates(); buttonOK
 void heading(const char* title) {
     display.clearDisplay(); display.setTextSize(1); display.setTextWrap(false); display.setTextColor(SH110X_WHITE);
     display.fillRect(0, 0, 128, 11, SH110X_WHITE); display.setTextColor(SH110X_BLACK);
-    display.setCursor(2, 2); display.print(title); display.setTextColor(SH110X_WHITE);
+    ui_text::draw(display,2,2,title,SH110X_BLACK,20);display.setTextColor(SH110X_WHITE);
+}
+void textRows(const char* text,int16_t y,size_t rows) {
+    for(size_t row=0;row<rows&&text&&*text;++row) {
+        while(*text==' '||*text=='\n')++text;
+        const size_t bytes=ui_text::prefixBytes(text,21);char part[43];
+        if(bytes){memcpy(part,text,bytes);part[bytes]=0;ui_text::draw(display,0,y+row*9,part);text+=bytes;}
+        else break;
+    }
 }
 void notice(const char* title, const char* text) {
-    heading(title); display.setTextWrap(true); display.setCursor(0, 15); display.print(text);
-    display.setTextWrap(false); display.setCursor(0, 56); display.print("BACK returns"); display.display();
+    heading(title);textRows(text,15,4);
+    ui_text::draw(display,0,56,"BACK - вернуться");display.display();
     while(digitalRead(BUTTON_BACK) == LOW) delay(2);
     while(digitalRead(BUTTON_BACK) != LOW) delay(2);
     while(digitalRead(BUTTON_BACK) == LOW) delay(2);
@@ -212,17 +222,17 @@ void appInformation(const research::apps::Entry& entry) {
         if(buttonBack.isClick()||buttonBack.isHolded())break;
         if(buttonUp.isClick()||buttonDown.isClick()){filePage=!filePage;redraw=true;}
         if(buttonOK.isClick()) {
-            if(!research::apps::toggleFavorite(appPreferences,entry.file))notice("Favorites full","Keep up to8 favorites. Remove one in its app info.");
-            else if(!saveAppPreferences())notice("SD preferences","Favorite changed in RAM; SD save failed.");
+            if(!research::apps::toggleFavorite(appPreferences,entry.file))notice("Избранное заполнено","Можно выбрать 8 файлов. Снимите звезду с другого.");
+            else if(!saveAppPreferences())notice("Ошибка карты SD","Выбор изменён, но не сохранён на карту.");
             redraw=true;
         }
         if(redraw) {
-            display.clearDisplay();pocket_draw::header(display,filePage?"App file":"App info",filePage?2:1,2,true);
-            display.setCursor(0,13);display.print(entry.title);
+            display.clearDisplay();pocket_draw::header(display,filePage?"Файл":"Описание",filePage?2:1,2,true);
+            ui_text::draw(display,0,13,entry.title);
             const char* text=filePage?entry.file:entry.description;
-            for(size_t row=0;row<3&&row*21<strlen(text);++row){char part[22];snprintf(part,sizeof part,"%.21s",text+row*21);display.setCursor(0,23+row*8);display.print(part);}
-            char detail[22];snprintf(detail,sizeof detail,"%lu B  %s",(unsigned long)entry.bytes,research::apps::favorite(appPreferences,entry.file)?"Starred":"Not starred");
-            display.setCursor(0,47);display.print(detail);pocket_draw::footer(display,"OK star UP info BK");display.display();redraw=false;
+            textRows(text,23,3);
+            char detail[43];snprintf(detail,sizeof detail,"%lu B %s",(unsigned long)entry.bytes,research::apps::favorite(appPreferences,entry.file)?"В избранном":"Без звезды");
+            ui_text::draw(display,0,47,detail);pocket_draw::footer(display,"OK звезда UP инфо BACK");display.display();redraw=false;
         }
         delay(2);
     }
@@ -281,12 +291,12 @@ void launch(const char* name) {
     char path[48]; snprintf(path, sizeof(path), "/apps/%s", name);
     File file = SD.open(path, FILE_READ);
     const size_t length = file ? file.size() : 0;
-    if(!length || length > LuaSandbox::kSourceBytes) { if(file) file.close(); notice("App rejected", "Missing/empty file or source exceeds32KiB."); return; }
+    if(!length || length > LuaSandbox::kSourceBytes) { if(file) file.close(); notice("Файл не открыт", "Нужен непустой .lua файл размером до 32 КиБ."); return; }
     void* bank = heap_caps_malloc(LuaSandbox::kHeapBytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     char* source = static_cast<char*>(heap_caps_malloc(length + 1, MALLOC_CAP_8BIT));
-    if(!bank || !source) { file.close(); free(bank); free(source); notice("App memory", "Not enough free RAM for the bounded Lua VM."); return; }
+    if(!bank || !source) { file.close(); free(bank); free(source); notice("Не хватает памяти", "Закройте радио и другие приложения. Попробуйте снова."); return; }
     const size_t read = file.read(reinterpret_cast<uint8_t*>(source), length); file.close(); source[length] = 0;
-    if(read != length) { free(source); free(bank); notice("App read failed", "SD read incomplete."); return; }
+    if(read != length) { free(source); free(bank); notice("Ошибка карты SD", "Файл прочитан не полностью. Проверьте карту."); return; }
     Runtime runtime = {}; LuaSandbox vm(bank, LuaSandbox::kHeapBytes, clockUs); activeApp = &runtime;
     bool good = vm.open(installBindings) && vm.load(source, length, path);
     free(source);
@@ -324,7 +334,12 @@ void launch(const char* name) {
                   unsigned(vm.peak()), unsigned(LuaSandbox::kHeapBytes));
     vm.close(); activeApp = nullptr; stopOwnedRadio(runtime); free(bank);
     while(digitalRead(BUTTON_BACK) == LOW || digitalRead(BUTTON_OK) == LOW) delay(2);
-    resetButtons(); if(!good) notice("App stopped", error);
+    resetButtons();
+    if(!good) {
+        const char* explanation=strstr(error,"quota")?"Приложение превысило лимит выполнения.":
+            strstr(error,"memory")?"Приложению не хватило памяти.":"Ошибка приложения. Подробности доступны через USB.";
+        notice("Приложение закрыто",explanation);
+    }
 }
 }
 
@@ -333,7 +348,7 @@ void runSdApps() {
     while(!research::labStop()) delay(10);
     Serial.printf("[Lua] device CPU=%luMHz drawWallUs=%lu callbackWallUs=%lu\n",static_cast<unsigned long>(getCpuFrequencyMhz()),static_cast<unsigned long>(LuaSandbox::kDrawWallUs),static_cast<unsigned long>(LuaSandbox::kWallUs));
     if(!appEntries)appEntries=static_cast<research::apps::Entry*>(heap_caps_calloc(32,sizeof(research::apps::Entry),MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT));
-    if(!appEntries){restoreReceiveMode();notice("App catalog","Not enough free memory.");return;}
+    if(!appEntries){restoreReceiveMode();notice("Каталог приложений","Не хватает свободной памяти.");return;}
     SD.mkdir("/apps");readAppPreferences();listApps();size_t selected=0,sectionIndex=0;bool root=true;
     research::apps::Section section=research::apps::Section::All;
     uint8_t indices[32];size_t count=research::apps::visible(appEntries,appCount,appPreferences,section,indices);
@@ -368,14 +383,14 @@ void runSdApps() {
         }
         if(redraw) {
             const size_t renderRows=root?6:count;
-            display.clearDisplay();pocket_draw::header(display,root?"SD Apps":research::apps::sectionName(section),renderRows?selected+1:0,renderRows,SD.exists("/apps"));
+            display.clearDisplay();pocket_draw::header(display,root?"Приложения":research::apps::sectionNameRu(section),renderRows?selected+1:0,renderRows,SD.exists("/apps"));
             const size_t first=research::apps::firstRow(selected,renderRows,3);
             for(size_t row=0;row<3&&first+row<renderRows;++row) {
-                const size_t index=first+row;char label[24];uint8_t icon=7;
+                const size_t index=first+row;char label[49];uint8_t icon=7;
                 if(root) {
                     uint8_t temporary[32];const auto category=research::apps::Section(index);
                     const size_t amount=research::apps::visible(appEntries,appCount,appPreferences,category,temporary);
-                    snprintf(label,sizeof label,"%s %u",research::apps::sectionName(category),unsigned(amount));
+                    snprintf(label,sizeof label,"%s %u",research::apps::sectionNameRu(category),unsigned(amount));
                     icon=index==2?5:index==3?2:index==1?4:index==4?6:7;
                 } else {
                     const auto& entry=appEntries[indices[index]];
@@ -384,8 +399,8 @@ void runSdApps() {
                 }
                 pocket_draw::listRow(display,12+row*14,label,index==selected,icon);
             }
-            if(!renderRows){display.setCursor(3,20);display.print(section==research::apps::Section::Favorites?"Hold OK on an app":"No apps in this group");display.setCursor(3,33);display.print(section==research::apps::Section::Favorites?"then OK to star it":"Copy .lua to /apps");}
-            pocket_draw::footer(display,root?"UP/DN OK open BK exit":"OK run HoldOK info BK");display.display();redraw=false;
+            if(!renderRows){ui_text::draw(display,3,20,section==research::apps::Section::Favorites?"Здесь пока пусто":"Приложений нет");ui_text::draw(display,3,33,section==research::apps::Section::Favorites?"Удерж. OK: избранное":"Файлы .lua: /apps");}
+            pocket_draw::footer(display,root?"UP/DN выбор OK открыть":"OK пуск Удерж.OK инфо");display.display();redraw=false;
         }
         delay(2);
     }
