@@ -1,0 +1,9 @@
+.pio/
+*.bin
+*.elf
+*.map
+__pycache__/
+dist/
+*.fap
+.vscode/
+test-results/
