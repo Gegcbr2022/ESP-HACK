@@ -9,8 +9,8 @@ in the release's device-operation report, not generalized to all features.
 | Area | Implemented / compiled | Native validation | Physical status |
 |---|---|---|---|
 | Original source baseline | Original sources built with pinned compatible platform | Build logs retained | Baseline image not flashed |
-| Original GPIO / SH1106 target | Existing mapping retained; accidental NRF remapping removed | Source/build review | Wiring/OLED/buttons require observation |
-| CC1101 reset / SPI timeouts | Same3.0.2 driver, local bounded fixes, sticky faults, counters | Real driver under deterministic SPI mocks | Boot probe can establish SPI/register/state access only |
+| Original GPIO / SH1106 target | Existing mapping retained; accidental NRF remapping removed | Source/build review | User confirmed main-menu OLED and buttons; additional workflows pending |
+| CC1101 reset / SPI timeouts | Same3.0.2 driver, local bounded fixes, sticky faults, counters | Real driver under deterministic SPI mocks | Actual boot probe PASS: PART00 / VERSION14, RX MARC0D, zero SPI/ready timeouts; RF behavior pending |
 | Legacy Standard Read | Correct first-frame packing, coherent rc-switch snapshot, no invalid512-entry scan | Packing/protocol guards tested | RF payload reception pending |
 | Legacy Read RAW | Interrupt ring replaces UI polling, post-burst RSSI issue fixed, damaged frames rejected | Real ISR code under GPIO/clock mocks | RF timing/drop rate/SD latency pending |
 | Exact AM270/AM650/FM238/FM476/FM12K | Pinned official1.5.1 register arrays | Exact bytes, arithmetic and boundaries | Receiver behavior pending |
@@ -26,9 +26,10 @@ in the release's device-operation report, not generalized to all features.
 | Modulation Explorer | Sequential four-preset RSSI/edge comparison | Preset/config tests | Physical comparison pending; no automatic identification claim |
 | Music Lab | RAW inspection and finite binary OOK RMT playback | Parser/staging/timing bounds | ESP→Flipper RAW reception/timing pending |
 | Sub-GHz Chat | Shared protocol,160 ASCII bytes,4fragments, ACK/retry/backoff/discovery/duplicates | C99/C++11 loss/duplicate/delay/reboot/wrap/bounds tests | Cross-device delivery and RF errors pending |
+| Flipper plaintext chat | Selectable stock CLI / Enhanced Sub-GHz Chat profile, 60-byte chunks, bounded ASCII/ANSI assembly; no encryption or ACK | 205,361 C99 checks and 205,361 C++11 checks, including malformed streams and profile arithmetic, on Windows and Linux | Physical exchange with the user's installed Flipper app pending |
 | Flipper FAP | Official1.5.1, API88.2, public exports, independent radio task | Shared protocol tests; actual strict FAP import check | Physical Flipper launch/UI/RF pending |
 | New OLED lab UI | Lightweight lists, keyboard, scrollable metadata, release guards | State helpers tested; no OLED/input simulator | Actual legibility/button workflow pending |
-| SD Apps / Lua SDK | Bounded SD-hosted Lua apps, monochrome drawing/input/clock and receive-only radio bindings; three source examples | Actual Lua VM/sandbox: 13,983 host checks and 4,500 sample frames; quotas, OOM, API removal, UI bounds | SD install, OLED/input behavior and RF dashboard pending |
+| SD Apps / Lua SDK | Bounded SD-hosted Lua apps, drawing/input/clock and receive-only radio bindings; five examples including Snake and 2048 | Actual Lua VM/sandbox: 59,532 host checks and 7,500 sample frames, including game state/merge/pause/restart checks | All five USB installs confirmed with SD SHA256 readback; all five VM load/tick/draw tests PASS on ESP32; interactive game/RF use pending |
 | Backup / flash utility | Full host read + independent esptool full-flash MD5 verification and saved-file SHA256; optional two-host-read mode; identity/segment gates | Host utility guards tested / reviewed as reported | Connected 4 MiB dump and independent verification succeeded; interrupted second host dump is not counted |
 
 ## Explicit incomplete items

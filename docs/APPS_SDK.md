@@ -173,7 +173,7 @@ host (Zig example):
 python tests/lua_sandbox/run.py --compiler <zig.exe>
 ```
 
-The checked host run passed 13,983 checks, including 4,500 sample frames,
+The checked host run passed 59,532 checks, including 7,500 sample frames,
 allocation/coalescing/canary checks, 25 VM reopen/close cycles, quota interruption,
 safe OOM handling, blocked APIs/bytecode, safe nonstring callback errors, and
 bounded table operations including giant sparse lengths and overlapping moves. Mocks also require

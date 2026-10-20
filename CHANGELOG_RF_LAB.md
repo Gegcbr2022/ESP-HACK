@@ -23,6 +23,9 @@
 - Added SD Apps across all four main-menu styles, a bounded Lua 5.4 runtime,
   drawing/buttons/time/receive-only radio bindings, three example apps and
   SHA256-verified USB installation without reflashing.
+- Added Snake and 2048 as SD apps with real-VM game-state tests, and a selectable
+  plaintext chat profile for the official CLI and Enhanced Sub-GHz Chat.
+  The plaintext mode has no delivery acknowledgements or encryption.
 
 Physical RF reception, timing, sensitivity, legal RF parameters and Flipper
 interoperability are not inferred from compilation or host tests.

@@ -1,6 +1,8 @@
 name: firmware-and-native-tests
 on:
   push:
+    paths-ignore:
+      - '**/*.md'
   pull_request:
   workflow_dispatch:
 permissions:
@@ -18,6 +20,7 @@ jobs:
       - run: python tests/portable/run_lab_tests.py --compiler g++
       - run: python tests/portable/run_legacy_tests.py --compiler g++
       - run: python tests/run_chat_tests.py --compiler g++
+      - run: python tests/flipper_chat_compat/run.py --compiler g++
       - run: python tests/spi_driver_mock/run_spi_tests.py --compiler g++
       - run: python tests/raw_capture_mock/run.py --cxx g++
       - run: python tests/triggered_capture/run_triggered_tests.py --compiler g++

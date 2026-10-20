@@ -13,7 +13,7 @@ The lab uses an independent radio task and a small monochrome list interface;
 display rendering and SD operations do not run in the GPIO edge ISR.
 
 Open **SD Apps** from the main menu to run Lua applications from `/apps`.
-Three examples and the [app SDK](docs/APPS_SDK.md) are included. Install a new
+Five examples, including Snake and 2048, and the [app SDK](docs/APPS_SDK.md) are included. Install a new
 app over USB with `python scripts/install_app.py --port COM4 my_app.lua` while
 the main menu is open. This transfers the source to SD and checks its SHA256;
 it does not flash the ESP32. Apps can draw, handle buttons, keep time and use
@@ -48,6 +48,10 @@ receive-only radio measurements within bounded memory and callback budgets.
   CRCs, ACKs, retry/backoff, duplicate suppression and RAM message history.
   Install the included FAP on official Flipper firmware 1.5.1/API88.2.
   Chat is unencrypted and unauthenticated.
+  Select **Mode: Flipper plain** for the standard CLI / Enhanced Sub-GHz Chat
+  plaintext protocol instead. In Enhanced Chat choose **No encryption** and
+  the same frequency. This mode broadcasts text without delivery ACKs; see
+  [compatibility details](docs/FLIPPER_CHAT_COMPATIBILITY.md).
 - **Diagnostics:** chip/register/state/RSSI/FIFO/timeout information, serial
   logs and reset/recovery. Boot performs a receive-only radio probe. Send
   `rfdiag` followed by a newline at 115200 baud while on the main menu to

@@ -21,14 +21,36 @@ logs are retained locally and are excluded from the public fork and release.
 ## Final SDK build
 
 The final Lua SDK image was written and all four segments passed explicit
-esptool verification. Its application image is 1,655,824 bytes, SHA256
-`1b8b5a8656efc1fc23511d34b886273c7ddbf2a76434bf6ade395db30cab9799`.
+esptool verification. The final image includes Flipper plaintext mode and
+five-app diagnostics. Its application image is 1,658,160 bytes, SHA256
+`ffc1cb663ffcad8c65bcbbaa6f1b5e578a6c780ce356ad846bc56b52e7106be1`.
 After reset, the receive-only probe passed again with CC1101 VERSION=14,
 MARCSTATE=0D and zero ready timeouts. SD mounted and UI initialization reported
-121,928 free heap bytes. The user confirmed that the OLED menu and buttons work.
+121,544 free heap bytes. The user confirmed that the OLED menu and buttons work
+during the preceding SDK build; final startup reached the same main menu.
 
-On-device Lua sample installation and execution are recorded separately below
-when UART communication and the sample checks have completed.
+The USB installer wrote `hello.lua` (895 bytes), `stopwatch.lua` (1,522 bytes)
+and `rf_dashboard.lua` (1,996 bytes), followed by `snake.lua` (3,541 bytes) and
+`game2048.lua` (4,230 bytes). Each received a matching `APP_INSTALLED`
+size/SHA256 confirmation after the SD file was closed and read back.
+
+Actual `appsdiag` output then reported:
+
+```text
+[Lua] SELFTEST PASS version=Lua 5.4.9 peak=14144/49152 instructionQuota=100000 wallUs=5000
+[Lua] SAMPLE name=hello.lua result=PASS peak=16784/49152
+[Lua] SAMPLE name=stopwatch.lua result=PASS peak=17936/49152
+[Lua] SAMPLE name=rf_dashboard.lua result=PASS peak=20832/49152
+[Lua] SAMPLE name=snake.lua result=PASS peak=23464/49152
+[Lua] SAMPLE name=game2048.lua result=PASS peak=25024/49152
+```
+
+The sample check loads source from SD and calls one tick/draw cycle in each
+fresh VM. Radio start is disabled in this diagnostic context. These results
+establish actual installation/VM execution and quota rejection, not interactive
+button coverage or physical RF measurements. UART communication stopped once
+after the reset/port sequence and recovered after the user reconnected USB;
+the successful sample checks were captured after that reconnection.
 
 ## Physical checks still needed
 
