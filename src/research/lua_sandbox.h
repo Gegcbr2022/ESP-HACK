@@ -141,6 +141,29 @@ public:
 private:
     static LuaSandbox* owner(lua_State* state) { return *static_cast<LuaSandbox**>(lua_getextraspace(state)); }
     static void removeGlobal(lua_State* state, const char* name) { lua_pushnil(state); lua_setglobal(state, name); }
+    static void boundedRange(lua_State* state, lua_Integer first, lua_Integer last) {
+        if(last >= first && lua_Unsigned(last) - lua_Unsigned(first) >= 1024)
+            luaL_error(state, "table operation exceeds 1024 elements");
+    }
+    static int boundedTable(lua_State* state) {
+        const int arguments = lua_gettop(state);
+        const int operation = int(lua_tointeger(state, lua_upvalueindex(2)));
+        luaL_checktype(state, 1, LUA_TTABLE);
+        // lua_rawlen returns size_t and truncates a sparse 64-bit length on ESP32.
+        const lua_Integer length = luaL_len(state, 1);
+        if(operation == 1) { // move can copy arbitrarily many nil entries without allocating.
+            boundedRange(state, luaL_checkinteger(state, 2), luaL_checkinteger(state, 3));
+        } else if(operation == 2) { // unpack's explicitly selected range.
+            boundedRange(state, luaL_optinteger(state, 2, 1), luaL_optinteger(state, 3, length));
+        } else {
+            // Sparse tables can have enormous raw lengths using very few hash entries.
+            if(length > 1024) return luaL_error(state, "table operation exceeds 1024 elements");
+            if(operation == 3)
+                boundedRange(state, luaL_optinteger(state, 3, 1), luaL_optinteger(state, 4, length));
+        }
+        lua_pushvalue(state, lua_upvalueindex(1)); lua_insert(state, 1);
+        lua_call(state, arguments, LUA_MULTRET); return lua_gettop(state);
+    }
     static int openLibraries(lua_State* state) {
         luaL_requiref(state, LUA_GNAME, luaopen_base, 1); lua_pop(state, 1);
         luaL_requiref(state, LUA_MATHLIBNAME, luaopen_math, 1); lua_pop(state, 1);
@@ -152,6 +175,14 @@ private:
         lua_getglobal(state, "string");
         const char* strings[] = {"dump", "rep", "find", "match", "gmatch", "gsub"};
         for(size_t i = 0; i < sizeof(strings) / sizeof(strings[0]); ++i) { lua_pushnil(state); lua_setfield(state, -2, strings[i]); }
+        lua_pop(state, 1);
+        lua_getglobal(state, "table");
+        const char* bulk[] = {"insert", "remove", "sort", "move", "unpack", "concat"};
+        const int operations[] = {0, 0, 0, 1, 2, 3};
+        for(size_t i = 0; i < sizeof(bulk) / sizeof(bulk[0]); ++i) {
+            lua_getfield(state, -1, bulk[i]); lua_pushinteger(state, operations[i]);
+            lua_pushcclosure(state, boundedTable, 2); lua_setfield(state, -2, bulk[i]);
+        }
         lua_pop(state, 1);
         return 0;
     }
