@@ -108,6 +108,8 @@ static bool vm_tests() {
     CHECK(load(vm,"app={draw=function() error('draw-failure') end}")); CHECK(!vm.draw()); CHECK(strstr(vm.error(),"draw-failure"));
     CHECK(load(vm,"app={tick=function() error('tick-failure') end}")); CHECK(!vm.tick(33)); CHECK(strstr(vm.error(),"tick-failure"));
     CHECK(load(vm,"app={input=function() error('input-failure') end}")); CHECK(!vm.input("ok","press")); CHECK(strstr(vm.error(),"input-failure"));
+    CHECK(load(vm,"app={draw=function() error(123,0) end}")); CHECK(!vm.draw()); CHECK(strstr(vm.error(),"without an error string"));
+    CHECK(load(vm,"app={draw=function() error({reason='table'},0) end}")); CHECK(!vm.draw()); CHECK(strstr(vm.error(),"without an error string"));
     CHECK(load(vm,"app=12")); CHECK(!vm.draw()); CHECK(strstr(vm.error(),"app must be a table"));
     CHECK(load(vm,"app={draw=12}")); CHECK(!vm.draw()); CHECK(strstr(vm.error(),"callback must be a function"));
     CHECK(load(vm,"app={draw=function() while true do end end}")); CHECK(!vm.draw());
@@ -118,6 +120,11 @@ static bool vm_tests() {
     CHECK(!vm.load("\x1bLua\x54\x00",6,"binary")); CHECK(strstr(vm.error(),"binary"));
     CHECK(load(vm,"app={tick=function() local t={} while true do t[#t+1]=string.format('%040d',#t) end end}"));
     CHECK(!vm.tick(33)); CHECK(strstr(vm.error(),"memory")); CHECK(vm.peak()<=sizeof bank.bytes);
+    vm.close(); CHECK(vm.used()==0);
+    CHECK(vm.open());
+    CHECK(load(vm,"reserve={};for i=1,210 do reserve[i]=string.format('%050d',i) end;app={draw=function() error(123,0) end}"));
+    CHECK(vm.used()>LuaSandbox::kHeapBytes*3/4); CHECK(!vm.draw()); CHECK(strstr(vm.error(),"without an error string"));
+    CHECK(load(vm,"app={draw=function() error({},0) end}")); CHECK(!vm.draw()); CHECK(strstr(vm.error(),"without an error string"));
     vm.close(); CHECK(vm.used()==0);
     for(unsigned i=0;i<16;++i) { CHECK(bank.before[i]==0xD3); CHECK(bank.after[i]==0xD3); }
     for(unsigned i=0;i<25;++i) { CHECK(vm.open()); CHECK(load(vm,"app={draw=function() return end}")); CHECK(vm.draw()); vm.close(); CHECK(vm.used()==0); }
