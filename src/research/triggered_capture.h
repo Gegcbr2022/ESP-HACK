@@ -17,12 +17,19 @@ public:
         : output_(output), capacity_(capacity), used_(0), threshold_(threshold),
           phase_(output && capacity ? Phase::Armed : Phase::Corrupt), head_(0), queued_(0),
           pendingTotal_(0), pendingLost_(0), discardedTail_(0), rawDropped_(0),
-          rawRejected_(0), badSamples_(0), lostSamples_(0), lastEdge_(startedUs), weakSince_(0),
-          first_(true), previousPositive_(false), strong_(false), triggered_(false) {}
+          rawRejected_(0), badSamples_(0), lostSamples_(0), droppedBase_(0), rejectedBase_(0),
+          discardedArmingDropped_(0), discardedArmingRejected_(0), discardedShort_(0),
+          rearms_(0), lastEdge_(startedUs), weakSince_(0), preQuietSince_(0),
+          first_(true), previousPositive_(false), strong_(false), triggered_(false),
+          preQuiet_(false), waitForWeak_(false) {}
 
     void integrity(uint32_t dropped, uint32_t rejected) {
-        rawDropped_ = dropped; rawRejected_ = rejected;
-        if((dropped || rejected) && (phase_ == Phase::Capturing || phase_ == Phase::Complete))
+        const uint32_t nextDropped = dropped - droppedBase_;
+        const uint32_t nextRejected = rejected - rejectedBase_;
+        if(phase_ == Phase::Armed && (nextDropped != rawDropped_ || nextRejected != rawRejected_))
+            preQuiet_ = false;
+        rawDropped_ = nextDropped; rawRejected_ = nextRejected;
+        if((rawDropped_ || rawRejected_) && (phase_ == Phase::Capturing || phase_ == Phase::Complete))
             phase_ = Phase::Corrupt;
     }
 
@@ -49,7 +56,15 @@ public:
         if(terminal()) return;
         const bool strong = dbm >= threshold_;
         if(phase_ == Phase::Armed) {
-            if(!strong) return;
+            if(!strong) {
+                if(!preQuiet_) { preQuiet_ = true; preQuietSince_ = nowUs; }
+                else if(uint32_t(nowUs - preQuietSince_) >= kQuietUs &&
+                        (rawDropped_ || rawRejected_ || badSamples_ || waitForWeak_))
+                    cleanArmedBoundary();
+                return;
+            }
+            preQuiet_ = false;
+            if(waitForWeak_) return;
             triggered_ = true;
             if(rawDropped_ || rawRejected_ || badSamples_) { phase_ = Phase::Corrupt; return; }
             phase_ = Phase::Capturing; strong_ = true;
@@ -69,15 +84,17 @@ public:
     }
 
     void poll(uint32_t nowUs) {
-        if(phase_ != Phase::Capturing || used_ < kMinimumPulses) return;
+        if(phase_ != Phase::Capturing) return;
         if(!strong_) {
             if(uint32_t(nowUs - weakSince_) < kQuietUs) return;
+            if(used_ < kMinimumPulses) { rearmShort(nowUs, true); return; }
             // RSSI stayed below threshold for the entire guard interval. This
             // explicitly excludes the deferred demodulator-noise tail, even if
             // its ring wrapped. Count all exclusions, rather than hide them.
             discardedTail_ += pendingTotal_; clearPending(); phase_ = Phase::Complete;
         } else if(uint32_t(nowUs - lastEdge_) >= kQuietUs) {
-            phase_ = Phase::Complete;
+            if(used_ < kMinimumPulses) rearmShort(nowUs, false);
+            else phase_ = Phase::Complete;
         }
     }
 
@@ -104,11 +121,35 @@ public:
     uint32_t dropped() const { return rawDropped_ + lostSamples_; }
     uint32_t rejected() const { return rawRejected_ + badSamples_; }
     uint32_t discardedTail() const { return discardedTail_; }
+    uint32_t discardedArmingDropped() const { return discardedArmingDropped_; }
+    uint32_t discardedArmingRejected() const { return discardedArmingRejected_; }
+    uint32_t discardedShort() const { return discardedShort_; }
+    uint32_t rearmCount() const { return rearms_; }
 
 private:
     void reject() {
         ++badSamples_;
         if(phase_ == Phase::Capturing) phase_ = Phase::Corrupt;
+        else if(phase_ == Phase::Armed) preQuiet_ = false;
+    }
+    void cleanArmedBoundary() {
+        // Only an RSSI-quiet, loss-free armed window may retire stale noise.
+        // Active capture damage never reaches this method.
+        discardedArmingDropped_ += rawDropped_;
+        discardedArmingRejected_ += rawRejected_ + badSamples_;
+        droppedBase_ += rawDropped_; rejectedBase_ += rawRejected_;
+        rawDropped_ = rawRejected_ = badSamples_ = 0;
+        clearPending(); first_ = true; previousPositive_ = false; waitForWeak_ = false;
+    }
+    void rearmShort(uint32_t nowUs, bool weakQuiet) {
+        if(pendingLost_) { lostSamples_ += pendingLost_; phase_ = Phase::Corrupt; return; }
+        discardedShort_ += uint32_t(used_) + pendingTotal_; ++rearms_;
+        used_ = 0; clearPending(); first_ = true; previousPositive_ = false;
+        phase_ = Phase::Armed; strong_ = triggered_ = false;
+        lastEdge_ = nowUs; preQuiet_ = weakQuiet; preQuietSince_ = nowUs;
+        // An unmodulated strong carrier cannot continually retrigger an empty
+        // candidate. Require a real weak-RSSI boundary before accepting more.
+        waitForWeak_ = !weakQuiet;
     }
     void remember(int32_t value) {
         pre_[head_] = value; head_ = (head_ + 1) % kPretrigger;
@@ -139,7 +180,9 @@ private:
     int32_t pre_[kPretrigger];
     size_t head_, queued_;
     uint32_t pendingTotal_, pendingLost_, discardedTail_;
-    uint32_t rawDropped_, rawRejected_, badSamples_, lostSamples_, lastEdge_, weakSince_;
-    bool first_, previousPositive_, strong_, triggered_;
+    uint32_t rawDropped_, rawRejected_, badSamples_, lostSamples_, droppedBase_, rejectedBase_;
+    uint32_t discardedArmingDropped_, discardedArmingRejected_, discardedShort_, rearms_;
+    uint32_t lastEdge_, weakSince_, preQuietSince_;
+    bool first_, previousPositive_, strong_, triggered_, preQuiet_, waitForWeak_;
 };
 }
