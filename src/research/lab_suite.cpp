@@ -5,6 +5,7 @@
 #include "test_decoder.h"
 #include "app_install.h"
 #include "lua_apps.h"
+#include "chat_profile.h"
 #include "../../shared/flipper_chat_compat.h"
 #include "../../shared/chat_session.h"
 #include "../subghz.h"
@@ -585,10 +586,8 @@ void chatApp(){
     const RadioSettings savedSettings=settings;const RegisterImage savedRadio=radio;
     const TxProfile savedProfile=profile;const uint8_t savedPower=powerIndex;const ChatMode savedMode=chatFormat;
     RegisterImage automatic;
-    for(size_t i=0;i<FLIPPER_CHAT_REGISTER_BYTES;i+=2)automatic.set(flipper_chat_registers[i],flipper_chat_registers[i+1]);
     RadioSettings automaticSettings;
-    if(!describeRadio(automatic,433920000,automaticSettings)){message("Chat unavailable","Cannot apply chat radio profile.");return;}
-    automaticSettings.txLimitMs=1000;automaticSettings.rxTimeoutMs=0;
+    if(!makeFlipperChatProfile(automatic,automaticSettings)){message("Chat unavailable","Cannot apply chat radio profile.");return;}
     settings=automaticSettings;radio=automatic;profile=TxProfile::ShieldedLab;powerIndex=1;chatFormat=ChatMode::FlipperPlaintext;
     const bool started=startMode(LabMode::Chat);
     if(started) {
