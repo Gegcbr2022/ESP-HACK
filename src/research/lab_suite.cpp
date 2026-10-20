@@ -6,6 +6,7 @@
 #include "app_install.h"
 #include "lua_apps.h"
 #include "chat_profile.h"
+#include "rf_clock_probe.h"
 #include "static_sub_encoder.h"
 #include "file_page.h"
 #include "../interface/ui_text.h"
@@ -52,8 +53,8 @@ void printChatStatus() {
     Serial.printf("[Chat] active=%u connected=%u mode=%s diagnostic=%u freq=%lu TX=%s reason=%s\n",
         s.active,s.connected,s.chatMode==ChatMode::FlipperPlaintext?"plain":"ack",s.chatDiagnostic,
         (unsigned long)s.frequencyHz,s.txEnabled?"enabled":"OFF",s.txBlockReason);
-    Serial.printf("[Chat] marc=%02X fifo=%02X pkt=%02X rssi=%d sync=%lu rearm=%lu packets=%lu crc=%lu fifoerr=%lu spi=%lu miso=%lu RX=%lu TX=%lu reject=%lu trunc=%lu len=%u lqi=%u\n",
-        s.marcState,s.rxBytes,s.pktStatus,s.rssiDbm,(unsigned long)s.syncEvents,(unsigned long)s.rxRearms,
+    Serial.printf("[Chat] marc=%02X fifo=%02X pkt=%02X rssi=%d peak=%d sync=%lu rearm=%lu packets=%lu crc=%lu fifoerr=%lu spi=%lu miso=%lu RX=%lu TX=%lu reject=%lu trunc=%lu len=%u lqi=%u\n",
+        s.marcState,s.rxBytes,s.pktStatus,s.rssiDbm,s.peakDbm,(unsigned long)s.syncEvents,(unsigned long)s.rxRearms,
         (unsigned long)s.packets,(unsigned long)s.crcErrors,(unsigned long)s.fifoErrors,(unsigned long)s.spiErrors,
         (unsigned long)s.misoTimeouts,(unsigned long)s.receivedMessages,(unsigned long)s.sentMessages,
         (unsigned long)s.plaintextRejected,(unsigned long)s.plaintextTruncated,s.lastPacketLength,s.lastLqi);
@@ -926,10 +927,59 @@ void radioLabSerialPoll() {
                 }
             }
             else if((serialChatContext||s.active)&&used)Serial.println("[Chat] busy: use chatstat, screen, chatsend TEST123, chatclose or chatstop");
+            else if(!strncmp(command,"subinspect ",11)) {
+                const char* path=command+11;
+                if(!inMenu||!safePath(path))Serial.println("[SUB] ERROR main menu and /subghz/ path required");
+                else if(inspectFile(path)) {
+                    research::StaticSubWaveform generated={};const char* unsupported=prepareOpenedFileSend(generated);
+                    Serial.printf("[SUB] path=%s kind=%u protocol=%s frequency=%lu bits=%u pulses=%lu durationUs=%llu eligible=%u\n",path,unsigned(openedInfo.kind),openedInfo.protocol,(unsigned long)openedInfo.frequencyHz,openedInfo.bits,(unsigned long)openedInfo.raw.pulses,(unsigned long long)openedInfo.raw.durationUs,unsupported==nullptr);
+                    if(unsupported)Serial.printf("[SUB] reason=%s\n",unsupported);
+                } else Serial.printf("[SUB] ERROR %s\n",notice);
+            }
+            else if(!strcmp(command,"rflisten433")) {
+                if(!inMenu)Serial.println("[RFListen] busy: return to the main menu");
+                else {
+                    research::RegisterImage image;research::RadioSettings listening;
+                    const bool prepared=research::loadPreset("AM270",image)&&research::describeRadio(image,433920000,listening);
+                    listening.rxTimeoutMs=2500;suspendLegacyReceive();
+                    const bool started=prepared&&research::labStart(research::LabMode::Monitor,image,listening,research::TxProfile::ReceiveOnly,0);
+                    Serial.printf("[RFListen] %s OOK433 RX-only 2500ms\n",started?"START":"FAIL");
+                    const uint32_t begin=millis();
+                    while(started&&millis()-begin<2600&&research::labSnapshot().active)delay(10);
+                    const research::LabSnapshot observed=research::labSnapshot();
+                    while(!research::labStop())delay(10);
+                    restoreReceiveMode();
+                    Serial.printf("[RFListen] peak=%d rssi=%d samples=%lu spi=%lu miso=%lu\n",observed.peakDbm,observed.rssiDbm,(unsigned long)observed.samples,(unsigned long)observed.spiErrors,(unsigned long)observed.misoTimeouts);
+                }
+            }
+            else if(!strcmp(command,"rftest princeton433")) {
+                if(!inMenu)Serial.println("[RFTest] busy: return to the main menu");
+                else {
+                    research::SubInfo known;known.kind=research::SubKind::Key;known.frequencyHz=433920000;
+                    known.bits=24;known.teUs=390;known.keyBytes=8;known.key[5]=0xA5;known.key[6]=0x3A;known.key[7]=0x53;
+                    snprintf(known.protocol,sizeof known.protocol,"Princeton");research::loadPreset("AM270",known.radio);
+                    research::StaticSubWaveform generated={};
+                    const auto encoded=research::encodeStaticSub(known,waveform,research::kWaveformCapacity,generated);
+                    uint32_t elapsed=0;int32_t timing=0;bool sent=false;suspendLegacyReceive();
+                    if(encoded==research::StaticSubError::None)sent=research::labTransmitRaw(waveform,generated.count,known.radio,known.frequencyHz,research::TxProfile::ShieldedLab,1,5000,elapsed,timing);
+                    restoreReceiveMode();
+                    Serial.printf("[RFTest] %s Princeton A53A53 freq=433920000 repeats=6 nominal=0dBm intervals=%u expectedUs=%lu elapsedUs=%lu deltaUs=%ld\n",sent?"PASS":"FAIL",unsigned(generated.count),(unsigned long)generated.durationUs,(unsigned long)elapsed,(long)timing);
+                }
+            }
+            else if(!strcmp(command,"rfclock")) {
+                if(!inMenu)Serial.println("[RFClock] busy: return to the main menu");
+                else {
+                    suspendLegacyReceive();research::RfClockProbeResult measured;
+                    const bool good=research::radioLabClockProbe(measured);
+                    restoreReceiveMode();
+                    Serial.printf("[RFClock] %s medianHz=%lu assumedHz=26000000 restored=%u error=%s\n",good?"PASS":"FAIL",(unsigned long)measured.medianHz,measured.restored,research::rfClockProbeErrorText(measured.error));
+                    for(unsigned i=0;i<3;++i)Serial.printf("[RFClock] sample=%u edges=%lu elapsedUs=%lu hz=%lu\n",i,(unsigned long)measured.samples[i].edges,(unsigned long)measured.samples[i].elapsedUs,(unsigned long)measured.samples[i].oscillatorHz);
+                }
+            }
             else if(handleAppInstallCommand(command)){}
             else if(!strcmp(command,"rfdiag"))radioLabBootDiagnostics();
             else if(!strcmp(command,"appsdiag"))sdAppsSelfTest();
-            else if(used)Serial.println("[RadioLab] commands: chatopen, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868, chatstop, screen, rfdiag, appsdiag, APP_PUT");
+            else if(used)Serial.println("[RadioLab] commands: chatopen, chatsend TEST123, chatclose, chatstat, chatlisten plain433/plain868, chatstop, screen, rfdiag, rfclock, rflisten433, rftest princeton433, subinspect /subghz/file.sub, appsdiag, APP_PUT");
             used=0;overflow=false;
         } else if(!overflow&&c>=32&&c<=126&&used+1<sizeof(command))command[used++]=c;
         else overflow=true;
