@@ -187,9 +187,12 @@ for the included examples. Bulk table operations are limited to 1,024 elements:
 and `concat` reject larger selected ranges (`concat` also checks table length).
 These guards include sparse tables whose length exceeds 32-bit integer range.
 
-Callbacks have a 100,000-instruction limit and a time check near 5 ms. The time
-check is cooperative through Lua hooks, not hard preemption inside a native C
-call. Native bindings have their own bounded behavior. Do not write blocking
+Each invocation retains a 100,000-instruction limit. Top-level Lua execution,
+`tick` and `input` have a 5 ms wall-time budget; `draw` has 10 ms for framebuffer
+work. Time checks run cooperatively through Lua hooks and after callback return,
+not by hard preemption inside a native C call. The 48 KiB VM bank and maximum
+256 drawing calls per callback are unchanged. Native bindings have their own
+bounded behavior. Do not write blocking
 loops or assume this VM is an operating-system security boundary. Install
 reviewed source you trust. Radio capture and packet timing remain native
 firmware work, never Lua timing loops.
@@ -208,11 +211,15 @@ host (Zig example):
 python tests/lua_sandbox/run.py --compiler <zig.exe>
 ```
 
-The checked Windows Zig and Ubuntu GCC runs each passed 91,617 checks,
+The checked Windows Zig and Ubuntu GCC runs each passed 91,714 checks,
 including 16,500 sample frames across all eleven apps,
 allocation/coalescing/canary checks, 25 VM reopen/close cycles, quota interruption,
 safe OOM handling, blocked APIs/bytecode, safe nonstring callback errors, and
 bounded table operations including giant sparse lengths and overlapping moves.
+Fake-clock boundary tests distinguish the 10 ms draw budget from 5 ms
+tick/input/top-level execution, including time spent in native work, Lua hook
+checks and microsecond clock wrap. A frozen-clock runaway draw still reaches
+the 100,000-instruction limit and fails.
 Game fixtures exercise merges, scoring, line clears, protected mine placement,
 flags, wins/losses and restart. Utility fixtures exercise decimal/range edges,
 all conversion directions, resistor codes and timer pause/expiry/clock wrap.

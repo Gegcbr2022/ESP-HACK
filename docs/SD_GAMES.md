@@ -48,8 +48,11 @@ border using an iterative queue of at most 40 cells. Flags prevent accidental
 reveals; at most seven flags may be placed. Reveal all 33 safe cells to win.
 
 Both new games use fixed board bounds, printable text, fewer than 256 drawing
-operations per callback and the runtime's 48 KiB VM bank. Game rules run under
-the existing instruction and cooperative wall-time quotas. There is no RF use.
+operations per callback and the runtime's 48 KiB VM bank. Each invocation has a
+100,000-instruction limit. Input/tick and top-level Lua execution retain a 5 ms
+wall-time budget; drawing has 10 ms for framebuffer work. Time checks are
+cooperative, including a check after return, and do not preempt native C calls.
+There is no RF use.
 
 ## Validation
 
