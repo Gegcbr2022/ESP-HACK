@@ -3,15 +3,22 @@
 #include <stddef.h>
 
 namespace research {
-enum class TxProfile : uint8_t { ReceiveOnly, ShieldedLab };
+enum class TxProfile : uint8_t { ReceiveOnly, ShieldedLab, FilePlayback };
+inline uint32_t cc1101FrequencyWord(uint32_t hz);
 // These are deliberate test channels, not a regional authorization database.
 inline bool laboratoryChannel(uint32_t hz) {
     return hz == 433920000UL || hz == 868350000UL;
 }
 inline bool permitLabTx(TxProfile profile, uint32_t hz, uint32_t durationMs,
                         uint32_t configuredLimitMs) {
-    return profile == TxProfile::ShieldedLab && laboratoryChannel(hz) &&
-           durationMs > 0 && durationMs <= configuredLimitMs && configuredLimitMs <= 5000;
+    if(durationMs == 0 || durationMs > configuredLimitMs || configuredLimitMs > 5000)
+        return false;
+    switch(profile) {
+    case TxProfile::ShieldedLab: return laboratoryChannel(hz);
+    // Manual, finite file playback preserves the file's supported RF frequency.
+    case TxProfile::FilePlayback: return cc1101FrequencyWord(hz) != 0;
+    default: return false;
+    }
 }
 static const size_t kWaveformCapacity = 2048;
 static const size_t kSweepBins = 64;

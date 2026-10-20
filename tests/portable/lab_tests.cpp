@@ -34,6 +34,58 @@ int main() {
     CHECK(!permitLabTx(TxProfile::ShieldedLab,433920000,1001,1000));
     CHECK(!permitLabTx(TxProfile::ShieldedLab,433920000,100,5001));
     CHECK(!permitLabTx(TxProfile::ShieldedLab,433920000,UINT32_MAX,5000));
+    // Appending the manual file policy must preserve persisted/worker enum values.
+    CHECK(unsigned(TxProfile::ReceiveOnly)==0);
+    CHECK(unsigned(TxProfile::ShieldedLab)==1);
+    CHECK(unsigned(TxProfile::FilePlayback)==2);
+    // Independent acceptance vectors cover all six inclusive hardware band edges,
+    // both sides of every gap, and files whose exact header is not a lab channel.
+    const uint32_t fileFrequencies[]={
+        300000000,300000001,347999999,348000000,
+        387000000,387000001,433889000,433920000,463999999,464000000,
+        779000000,779000001,868350000,906400000,927999999,928000000
+    };
+    for(unsigned i=0;i<sizeof fileFrequencies/sizeof fileFrequencies[0];++i) {
+        const uint32_t hz=fileFrequencies[i];
+        CHECK(permitLabTx(TxProfile::FilePlayback,hz,1,1));
+        CHECK(permitLabTx(TxProfile::FilePlayback,hz,5000,5000));
+        CHECK(!permitLabTx(TxProfile::ReceiveOnly,hz,1,5000));
+        CHECK(permitLabTx(TxProfile::ShieldedLab,hz,100,1000)==
+              (hz==433920000 || hz==868350000));
+    }
+    const uint32_t blockedFrequencies[]={
+        0,1,299999999,348000001,367500000,386999999,
+        464000001,621500000,778999999,928000001,1000000000,UINT32_MAX
+    };
+    for(unsigned i=0;i<sizeof blockedFrequencies/sizeof blockedFrequencies[0];++i) {
+        CHECK(!permitLabTx(TxProfile::FilePlayback,blockedFrequencies[i],1,5000));
+        CHECK(!permitLabTx(TxProfile::ShieldedLab,blockedFrequencies[i],1,5000));
+        CHECK(!permitLabTx(TxProfile::ReceiveOnly,blockedFrequencies[i],1,5000));
+    }
+    const uint32_t adjacentChannels[]={433919999,433920001,868349999,868350001};
+    for(unsigned i=0;i<sizeof adjacentChannels/sizeof adjacentChannels[0];++i) {
+        CHECK(permitLabTx(TxProfile::FilePlayback,adjacentChannels[i],1,5000));
+        CHECK(!permitLabTx(TxProfile::ShieldedLab,adjacentChannels[i],1,5000));
+    }
+    struct DurationCase { uint32_t duration,limit; bool allowed; };
+    const DurationCase durationCases[]={
+        {1,1,true},{4999,5000,true},{5000,5000,true},{0,0,false},
+        {0,5000,false},{1,0,false},{2,1,false},{5001,5000,false},
+        {1,5001,false},{5001,5001,false},{1,UINT32_MAX,false},
+        {UINT32_MAX,5000,false},{UINT32_MAX,UINT32_MAX,false}
+    };
+    for(unsigned i=0;i<sizeof durationCases/sizeof durationCases[0];++i) {
+        const DurationCase& test=durationCases[i];
+        CHECK(permitLabTx(TxProfile::FilePlayback,906400000,test.duration,test.limit)==test.allowed);
+        CHECK(permitLabTx(TxProfile::ShieldedLab,433920000,test.duration,test.limit)==test.allowed);
+        CHECK(!permitLabTx(TxProfile::ReceiveOnly,433920000,test.duration,test.limit));
+    }
+    // Invalid persisted bytes never gain transmit permission, even on valid channels.
+    for(unsigned profile=3;profile<256;++profile) {
+        CHECK(!permitLabTx(static_cast<TxProfile>(profile),433920000,1,5000));
+        CHECK(!permitLabTx(static_cast<TxProfile>(profile),868350000,5000,5000));
+        CHECK(!permitLabTx(static_cast<TxProfile>(profile),906400000,1,5000));
+    }
     // A completed FIFO packet can only be consumed after RX has returned IDLE.
     // Empty/truncated IDLE buffers must be flushed/rearmed rather than stall.
     CHECK(fifoAction(1,0,0)==FifoAction::Recover);
