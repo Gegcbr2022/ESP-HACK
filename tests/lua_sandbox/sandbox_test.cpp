@@ -91,6 +91,7 @@ static int bindings(lua_State* state) {
     luaL_newlib(state,radio); lua_setglobal(state,"radio"); return 0;
 }
 static bool load(LuaSandbox& vm,const char* source) { return vm.load(source,strlen(source),"test"); }
+#include "wall_budget_test.inc"
 static bool allocator_tests() {
     alignas(16) uint8_t bank[4096]; LuaArena arena(bank,sizeof bank);
     void* a=arena.resize(nullptr,256); void* b=arena.resize(nullptr,512); void* c=arena.resize(nullptr,128);
@@ -313,7 +314,7 @@ static bool example_test(const char* path,unsigned kind) {
 #include "games_extra_test.inc"
 int main(int argc,char** argv) {
     if(argc!=12) { fprintf(stderr,"Pass paths for all eleven shipped Lua apps\n"); return 2; }
-    if(!allocator_tests()||!vm_tests()) return 1;
+    if(!allocator_tests()||!vm_tests()||!wall_budget_tests()) return 1;
     for(int i=1;i<argc;++i) {
         const unsigned kind=i==3?1:(i==1||i==2||i==4?0:3);
         if(!example_test(argv[i],kind)) return 1;
