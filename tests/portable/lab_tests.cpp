@@ -16,6 +16,32 @@ int main() {
     CHECK(!permitLabTx(TxProfile::ShieldedLab,433920000,1001,1000));
     CHECK(!permitLabTx(TxProfile::ShieldedLab,433920000,100,5001));
     CHECK(!permitLabTx(TxProfile::ShieldedLab,433920000,UINT32_MAX,5000));
+    // A completed FIFO packet can only be consumed after RX has returned IDLE.
+    // Empty/truncated IDLE buffers must be flushed/rearmed rather than stall.
+    CHECK(fifoAction(1,0,0)==FifoAction::Recover);
+    CHECK(fifoAction(1,1,0)==FifoAction::Recover);
+    CHECK(fifoAction(1,2,0)==FifoAction::Recover);
+    for(unsigned count=3;count<=63;++count) {
+        CHECK(fifoAction(1,uint8_t(count),0)==FifoAction::Read);
+        CHECK(fifoAction(1,uint8_t(count),UINT32_MAX)==FifoAction::Read);
+        CHECK(fifoAction(13,uint8_t(count),999)==FifoAction::Wait);
+    }
+    CHECK(fifoAction(13,0,999)==FifoAction::Wait);
+    CHECK(fifoAction(13,0,1000)==FifoAction::Recover);
+    CHECK(fifoAction(13,63,1000)==FifoAction::Recover);
+    CHECK(fifoAction(13,3,UINT32_MAX)==FifoAction::Recover);
+    CHECK(fifoAction(19,3,99)==FifoAction::Wait);
+    CHECK(fifoAction(19,3,100)==FifoAction::Recover);
+    CHECK(fifoAction(0,0,99)==FifoAction::Wait);
+    CHECK(fifoAction(0,0,100)==FifoAction::Recover);
+    const uint8_t fifoStates[]={0,1,13,17,19};
+    for(unsigned i=0;i<sizeof fifoStates/sizeof fifoStates[0];++i) {
+        CHECK(fifoAction(fifoStates[i],0x80,0)==FifoAction::Recover);
+        CHECK(fifoAction(fifoStates[i],0xFF,0)==FifoAction::Recover);
+        CHECK(fifoAction(fifoStates[i],64,0)==FifoAction::Recover);
+        CHECK(fifoAction(fifoStates[i],127,0)==FifoAction::Recover);
+    }
+    CHECK(fifoAction(17,0,0)==FifoAction::Recover);
     CHECK(cc1101FrequencyWord(433920000UL)==1093745UL);
     CHECK(!cc1101FrequencyWord(0)); CHECK(!cc1101FrequencyWord(348000001));
     CHECK(!cc1101FrequencyWord(500000000)); CHECK(!cc1101FrequencyWord(UINT32_MAX));
