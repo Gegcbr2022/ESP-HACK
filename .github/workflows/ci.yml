@@ -34,6 +34,7 @@ jobs:
       - run: python tests/keyboard_mock/run.py --compiler g++
       - run: python tests/radio_calibration_mock/run.py --compiler g++
       - run: python tests/raw_capture_mock/run.py --cxx g++
+      - run: python tests/raw_restore_mock/run.py --compiler g++
       - run: python tests/triggered_capture/run_triggered_tests.py --compiler g++
       - run: python tests/lua_sandbox/run.py --compiler gcc
       - run: python tests/app_install_mock/run.py --cxx g++
