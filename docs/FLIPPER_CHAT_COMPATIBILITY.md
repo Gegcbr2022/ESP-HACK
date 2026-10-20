@@ -1,11 +1,16 @@
 # Flipper plaintext chat compatibility
 
-Radio Lab's chat starts in **Flipper plaintext**, matching the user's Unleashed
-chat setup. This mode uses the stock Flipper CLI / Enhanced Sub-GHz Chat
-plaintext stream. **ESP ACK** remains selectable for the framed ESP-HACK
-protocol and its companion FAP. Select the same mode and frequency on the
-participants. Switching mode restarts the radio worker and clears the displayed
-chat history.
+Radio Lab's simple chat automatically selects **Flipper plaintext at
+433.920 MHz**, matching the stock Flipper CLI / Enhanced Sub-GHz Chat
+plaintext stream. During this chat session it selects the **ShieldedLab** TX
+profile at nominal **0 dBm**. This is the user's closed, shielded laboratory
+configuration; the value is a radio setting, not a calibrated power measurement.
+It sends no text automatically. Exiting chat stops its radio worker and restores
+the previous Radio Settings, radio preset, TX profile, power and chat mode.
+
+**ESP ACK** remains available in **Advanced** for the framed ESP-HACK protocol
+and its companion FAP. Both participants must use the same format. Switching
+format restarts the worker and clears the displayed history.
 
 | Mode | Peer | Delivery meaning |
 |---|---|---|
@@ -14,18 +19,28 @@ chat history.
 
 ## Open a compatible peer
 
-1. Choose the matching frequency in Radio Settings, then open
-   **SubGHz → Radio Lab → Sub-GHz Chat** on ESP32. It starts in
-   **Flipper plaintext**; the mode item shows **Mode: Flipper plain**.
-   Pressing that mode item switches formats, so leave it unchanged for Unleashed.
+1. Open **SubGHz → Radio Lab → Sub-GHz Chat** on ESP32. The simple conversation
+   screen applies 433.920 MHz and the plaintext profile automatically; no prior
+   Radio Settings changes are needed.
 2. For official firmware 1.5.1, connect the Flipper CLI and run
    `subghz chat 433920000 0` for its internal radio. Alternatively open
-   Enhanced Sub-GHz Chat, choose the same frequency and **No encryption**.
-3. Start with reception and enable the existing laboratory TX profile only
-   for a permitted test. Compose a short unique ASCII message on either peer.
-4. Compare complete received text. **Sent** reports local RF completion only.
-   **Send presence** is a plaintext broadcast; there are no discovered peer IDs
-   or application acknowledgements in this mode.
+   Enhanced Sub-GHz Chat, choose **433.920 MHz** and **No encryption**. ESP32
+   cannot change the Flipper's encryption setting remotely.
+3. On ESP32 press **OK**, then **OK** again to send **TEST123**. The send menu
+   initially selects TEST123 and also offers **Write message**, **Hello**,
+   **OK** and **Advanced**. Selecting a message queues one finite send; entering
+   chat or opening the menu does not transmit a message.
+4. **UP/DOWN** read message pages and older/newer history. **BACK** exits.
+   Advanced holds the technical mode, peer and delivery diagnostics controls.
+5. Compare complete received text both ways. **Sent** reports local RF
+   completion only. Plaintext has no discovered peer IDs or application ACKs.
+
+The screen shows Ready, Sending, Sent, Failed or a radio error, with a blocking
+reason when relevant. The existing limits remain: at least 100 ms between RF
+packets and a one-second transmission-attempt budget per 60-second window.
+Attempts, including failures, consume that budget; a plaintext message reserves
+100 ms per remaining chunk before its first chunk starts. Carrier-busy waiting
+and a depleted budget can delay or expire a send.
 
 The official CLI command and terminal-colored name prefix are documented by
 the pinned [official CLI source](https://github.com/flipperdevices/flipperzero-firmware/blob/9e810dc399e027e48ce07751df72168abbb19065/applications/main/subghz/subghz_cli.c).
@@ -79,7 +94,9 @@ and splits its byte stream into RF packets of at most 60 bytes. ESP32's
 ESP32 limits `PKTLEN` to 60 and enables local CRC autoflush/status append
 (`PKTCTRL1=0C`). Stock source specifies `PKTLEN=00` and leaves `PKTCTRL1` at its
 reset value `04`. These are receiver/FIFO handling differences; the transmitted
-length, text bytes and CRC format remain the same.
+length, text bytes and CRC format remain the same. The receive-only diagnostic
+below uses `PKTCTRL1=04` so bad-CRC packets can reach the bounded manual CRC
+check and appear in its counters; it does not change the wire format.
 
 Outgoing messages contain `ESP-HACK: `, 1–160 printable ASCII text bytes and
 CRLF: at most 172 bytes, split into at most three 60-byte RF chunks. A failed
@@ -95,6 +112,34 @@ reject the line. Continuous streams exceeding four seconds are rejected until
 a line/silence boundary. Text beyond 160 bytes is visibly marked
 ` [truncated]`. Timing comparisons tolerate normal 32-bit millisecond wrap.
 
+## USB diagnostics
+
+Send these newline-terminated commands through the firmware's existing USB
+serial connection. They do not send radio text.
+
+| Command | Behavior |
+|---|---|
+| `chatstat` | Prints a cached worker snapshot: active/connected state, format, frequency, TX permission and reason, RSSI, sync/rearm counts, packet/CRC/FIFO/SPI/MISO errors, message counters, last packet length/LQI, configured packet registers and last received text. It performs no SPI access. |
+| `chatlisten plain433` | From the main menu with no active radio worker, starts a receive-only plaintext diagnostic at 433.920 MHz for at most 30 seconds. |
+| `chatlisten plain868` | Same bounded receive-only diagnostic at 868.350 MHz; the Flipper must be set to that frequency. This does not change simple chat's 433.920 MHz default. |
+| `chatstop` | Requests the current worker to stop. In the chat UI, exit and reopen chat to restart it. |
+| `screen` | Prints `SCREEN12864`, the cached 1024-byte monochrome OLED framebuffer as hexadecimal, then `ENDSCREEN`. It reads the UI buffer without a radio SPI operation or display refresh. |
+
+`chatstat`, `screen` and `chatstop` are accepted while the chat screen and its
+dialogs are open. A new `chatlisten` is rejected while another radio worker or
+the chat UI owns the radio. On its normal timeout or stop, the diagnostic joins
+its worker before restoring legacy reception. Diagnostic TX is disabled even
+if the normal chat profile enables TX. It prints its start configuration,
+received text as `[Chat] RX text=...`, and a final status on completion.
+
+For a receive check, leave ESP32 at the main menu, issue
+`chatlisten plain433`, send a unique short message from the Flipper during the
+30-second window, then collect `chatstat`. The diagnostic keeps bad-CRC packets
+for manual rejection instead of silently flushing them. Sync, CRC and FIFO
+counters can narrow a failure; a zero counter alone does not establish a radio
+fault or successful interoperability. Register values labeled configured are
+the applied configuration cache, not a fresh SPI register dump.
+
 ## Validation status
 
 Run `python tests/flipper_chat_compat/run.py --compiler g++` for C99 and C++11
@@ -105,9 +150,13 @@ continuous-stream limits, clock wrap, every outgoing length, local-send status,
 failure/no-retry and late-result rejection after timeout. Each language also
 executes 100,000 malformed-stream events with state bounds and memory canaries.
 
-These are host codec/state-machine tests. Bidirectional RF reception with a
-physical Flipper, app UI behavior, loss, FIFO recovery and measured radio
-parameters remain pending until separately recorded in the hardware report.
+These are host codec/state-machine tests. The user reported no received messages
+in either direction with Enhanced/Unleashed on the preceding release. The exact
+installed Flipper version, selected frequency and encryption setting were not
+confirmed in that report. The simplified UI and diagnostics do not establish
+that the RF failure is resolved. Bidirectional reception with a physical
+Flipper, app UI behavior, loss, FIFO recovery and measured radio parameters
+remain pending until separately recorded in the hardware report.
 For a physical check, exchange unique short and 160-byte messages both ways,
 compare exact text, then repeat with ANSI-colored CLI names and interrupted
 traffic. Record failures as well as successes.
